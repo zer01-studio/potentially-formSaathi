@@ -32,7 +32,13 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ["mongoose"],
+  serverExternalPackages: [
+    "mongoose",
+    "pdfjs-dist",
+    "pdf-to-img",
+    "@napi-rs/canvas",
+    "tesseract.js",
+  ],
   turbopack: {
     rules: {
       "*.css": {

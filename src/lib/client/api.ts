@@ -42,12 +42,17 @@ function readCookie(name: string): string | null {
 
 export async function apiRequest<T>(
   path: string,
-  options: { method?: string; body?: unknown; signal?: AbortSignal } = {},
+  options: {
+    method?: string;
+    body?: unknown;
+    formData?: FormData;
+    signal?: AbortSignal;
+  } = {},
 ): Promise<T> {
   const method = options.method ?? "GET";
   const headers: Record<string, string> = { Accept: "application/json" };
 
-  if (options.body !== undefined) {
+  if (options.body !== undefined && !options.formData) {
     headers["Content-Type"] = "application/json";
   }
 
@@ -61,7 +66,11 @@ export async function apiRequest<T>(
     response = await fetch(path, {
       method,
       headers,
-      body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+      body: options.formData
+        ? options.formData
+        : options.body !== undefined
+          ? JSON.stringify(options.body)
+          : undefined,
       credentials: "same-origin",
       signal: options.signal,
     });

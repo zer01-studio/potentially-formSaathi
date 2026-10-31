@@ -18,19 +18,44 @@ export type ApiOptions = {
   auth?: "none" | "optional" | "required";
   scopes?: Scope[];
   rateLimit?: { limit: number; windowMs: number; namespace: string };
+  userRateLimit?: { limit: number; windowMs: number; namespace: string };
 };
 
 export type ApiContext = {
   request: NextRequest;
   auth: ApiAuth | null;
+  params: Record<string, string | string[]>;
 };
 
 export type ApiRouteHandler = (context: ApiContext) => Promise<Response> | Response;
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
+async function resolveRouteParams(
+  context: unknown,
+): Promise<Record<string, string | string[]>> {
+  if (!context || typeof context !== "object") return {};
+  const raw = (context as { params?: unknown }).params;
+  if (!raw) return {};
+
+  const resolved = await raw;
+  if (!resolved || typeof resolved !== "object") return {};
+
+  const params: Record<string, string | string[]> = {};
+  for (const [key, value] of Object.entries(resolved as Record<string, unknown>)) {
+    if (typeof value === "string" || Array.isArray(value)) {
+      params[key] = value as string | string[];
+    }
+  }
+  return params;
+}
+
 export function withApi(options: ApiOptions, handler: ApiRouteHandler) {
-  return async function apiRoute(request: NextRequest): Promise<Response> {
+  return async function apiRoute(
+    request: NextRequest,
+    context?: unknown,
+  ): Promise<Response> {
+    const params = await resolveRouteParams(context);
     const start = Date.now();
     const origin = request.headers.get("origin");
     const selfOrigin = request.nextUrl.origin;
@@ -54,20 +79,25 @@ export function withApi(options: ApiOptions, handler: ApiRouteHandler) {
         );
 
         if (!result.allowed) {
-          logWarn("api.rate_limited", { route: request.nextUrl.pathname });
-          const limited = apiError(
-            429,
-            "rate_limited",
-            "Too many requests. Please wait a moment and try again.",
-            undefined,
-            { "Retry-After": String(result.retryAfterSeconds) },
-          );
-          return finalize(limited, request, origin, selfOrigin, "none", start);
+          return rateLimited(request, origin, selfOrigin, "none", start, result.retryAfterSeconds);
         }
       }
 
       const auth = await resolveApiAuth(request);
       authKind = auth?.kind ?? "none";
+
+      if (options.userRateLimit && auth) {
+        const key = `${options.userRateLimit.namespace}:user:${hashForRateLimit(auth.userId)}`;
+        const result = rateLimiter.consume(
+          key,
+          options.userRateLimit.limit,
+          options.userRateLimit.windowMs,
+        );
+
+        if (!result.allowed) {
+          return rateLimited(request, origin, selfOrigin, authKind, start, result.retryAfterSeconds);
+        }
+      }
 
       if (options.auth === "required" && !auth) {
         throw new ApiHttpError(401, "auth_required", "Please sign in to continue.");
@@ -101,7 +131,7 @@ export function withApi(options: ApiOptions, handler: ApiRouteHandler) {
         }
       }
 
-      const response = await handler({ request, auth });
+      const response = await handler({ request, auth, params });
       return finalize(response, request, origin, selfOrigin, authKind, start);
     } catch (error) {
       const response = errorToResponse(error);
@@ -114,6 +144,25 @@ export function withApi(options: ApiOptions, handler: ApiRouteHandler) {
       return finalize(response, request, origin, selfOrigin, authKind, start);
     }
   };
+}
+
+function rateLimited(
+  request: NextRequest,
+  origin: string | null,
+  selfOrigin: string,
+  authKind: string,
+  start: number,
+  retryAfterSeconds: number,
+): Response {
+  logWarn("api.rate_limited", { route: request.nextUrl.pathname });
+  const limited = apiError(
+    429,
+    "rate_limited",
+    "Too many requests. Please wait a moment and try again.",
+    undefined,
+    { "Retry-After": String(retryAfterSeconds) },
+  );
+  return finalize(limited, request, origin, selfOrigin, authKind, start);
 }
 
 function finalize(

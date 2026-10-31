@@ -62,10 +62,12 @@ export type ServicesStatus = {
   database: boolean;
 };
 
+export const ocrProvider = env.OCR_PROVIDER.trim().toLowerCase();
+
 export const services: ServicesStatus = {
   gemma: env.AI_ENABLED && Boolean(env.GEMMA_API_KEY) && Boolean(env.GEMMA_MODEL),
   elevenlabs: Boolean(env.ELEVENLABS_API_KEY) && Boolean(env.ELEVENLABS_VOICE_ID),
-  ocr: Boolean(env.OCR_PROVIDER),
+  ocr: ocrProvider === "tesseract",
   database: Boolean(env.MONGODB_URI),
 };
 
