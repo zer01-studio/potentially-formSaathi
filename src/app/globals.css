@@ -5,7 +5,7 @@
 :root {
   color-scheme: light;
 
-  --background: #f3edde;
+  --background: #f2efde;
   --foreground: #172420;
   --card: #fbf7eb;
   --card-foreground: #172420;
@@ -13,17 +13,17 @@
   --muted-foreground: #5c6a60;
   --border: #d8ccb2;
   --border-strong: #b6a583;
-  --primary: #0f4c3f;
+  --primary: #6d2d2d;
   --primary-foreground: #f4f8ee;
   --accent: #e3a23f;
-  --accent-strong: #9a5c10;
+  --accent-strong: #6d2d2d;
   --accent-soft: #f1ddb4;
   --accent-foreground: #2b1c06;
   --ring: #2d6b58;
   --success: #2f7d54;
   --warning: #a4650f;
   --danger: #a53a2e;
-  --paper-line: color-mix(in srgb, #172420 7%, transparent);
+  --paper-line: color-mix(in srgb, #172420 6%, transparent);
   --glow-primary: color-mix(in srgb, #0f4c3f 16%, transparent);
   --glow-accent: color-mix(in srgb, #e3a23f 28%, transparent);
   --shadow-soft: 0 1px 0 rgb(23 36 32 / 0.04), 0 24px 48px -32px rgb(23 36 32 / 0.35);
@@ -51,7 +51,7 @@
   --success: #74c99a;
   --warning: #e6b06a;
   --danger: #ef9a8e;
-  --paper-line: color-mix(in srgb, #e9efe6 6%, transparent);
+  --paper-line: color-mix(in srgb, #e9efe6 7%, transparent);
   --glow-primary: color-mix(in srgb, #8fdcc4 12%, transparent);
   --glow-accent: color-mix(in srgb, #f0b45f 16%, transparent);
   --shadow-soft: 0 1px 0 rgb(0 0 0 / 0.2), 0 24px 48px -32px rgb(0 0 0 / 0.8);
@@ -110,11 +110,16 @@
   }
 }
 
-@utility paper-grid {
+/* @utility paper-grid {
   background-image:
     linear-gradient(to right, var(--paper-line) 1px, transparent 1px),
     linear-gradient(to bottom, var(--paper-line) 1px, transparent 1px);
   background-size: 56px 56px;
+} */
+ @utility paper-grid {
+  background-image:
+    repeating-linear-gradient(60deg, var(--paper-line) 0 1px, transparent 1px 16px),
+    repeating-linear-gradient(-60deg, var(--paper-line) 0 1px, transparent 1px 16px);
 }
 
 @utility grain {
