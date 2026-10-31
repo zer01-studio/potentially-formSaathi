@@ -50,7 +50,7 @@ function candidateText(payload: unknown): string {
     .trim();
 }
 
-function extractJsonObject(text: string): unknown {
+export function extractJsonObject(text: string): unknown {
   const firstBrace = text.indexOf("{");
   const lastBrace = text.lastIndexOf("}");
   if (firstBrace === -1 || lastBrace <= firstBrace) {
@@ -108,7 +108,9 @@ async function requestGeneration(prompt: string): Promise<string> {
   }
 
   const text = candidateText(payload);
-  if (!text) throw new GemmaError("empty_response");
+  if (!text) {
+    throw new GemmaError("empty_response");
+  }
 
   return text;
 }
@@ -120,7 +122,7 @@ function isRetryable(promptError: unknown): boolean {
   );
 }
 
-async function requestGenerationWithRetry(prompt: string): Promise<string> {
+export async function requestGenerationWithRetry(prompt: string): Promise<string> {
   try {
     return await requestGeneration(prompt);
   } catch (error) {

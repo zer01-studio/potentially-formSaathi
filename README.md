@@ -14,6 +14,8 @@ external AI or voice services are unavailable.
 > Voice replies (ElevenLabs TTS/STT, greyed out without a key), optional AI notes,
 > Templates placeholder, Context Explorer, answer memory/prefill, API tokens,
 > and the scoped autofill-profile endpoint are all live.
+> A reference Chrome extension in `extension/` fills any page from those answers,
+> with a review step before anything is written.
 > The AI now **reads the whole form in one pass** and groups related fields into as
 > few steps as possible — never generating or guessing answers, only rewiring
 > wording, labels, and grouping. Falls back to one-field-per-step when unavailable.
@@ -445,6 +447,122 @@ web session. Context items, the autofill profile, and voice endpoints are live;
 
 ---
 
+## Browser extension — walkthrough
+
+`extension/` is a Chrome/Edge side panel (Manifest V3, Chrome 114+) that fills a
+form on any page from answers you already own — or collects answers in a chat and
+fills them once you approve each one. It uses the same `/api/v1` API with a
+bearer token.
+
+**Safety model**
+
+- Nothing is written until you press **Apply**. Rows are pre-ticked only when the
+  matcher is confident, and any tick can be removed.
+- The extension **never submits** the form.
+- Answer **values are never sent to Gemma.** The model sees labels, input types,
+  and option lists, and returns only which saved key belongs where; the server
+  maps the key back to the stored value.
+- Doubtful fields are never filled silently — see [Ambiguous
+  fields](#ambiguous-fields).
+
+### 1. Load it unpacked
+
+1. Open `chrome://extensions` (or `edge://extensions`).
+2. Turn on **Developer mode**.
+3. **Load unpacked** → select the `extension/` folder.
+4. Pin **FormSaathi Autofill** to the toolbar.
+
+### 2. Allow the extension origin
+
+Cross-origin preflights are answered only for allow-listed origins
+(`src/proxy.ts`), and an extension has its own origin.
+
+1. Copy the extension ID from `chrome://extensions`.
+2. Add it to `.env.local`:
+
+   ```
+   EXTENSION_ALLOWED_ORIGINS=chrome-extension://<your-extension-id>
+   ```
+
+3. Restart `npm run dev`.
+
+The panel's ⚙ settings print the exact line for your install, so you can copy it
+from there.
+
+### 3. Create a token
+
+FormSaathi → **Workspace → Context → Access tokens** → create one:
+
+| Scope | Needed for |
+| --- | --- |
+| `autofill:read` | The assist endpoint (required) |
+| `forms:read` | Listing and loading your saved forms |
+
+The raw token is shown once. Revoke it from the same screen at any time.
+
+### 4. Connect the panel
+
+Click the toolbar icon to open the side panel → **⚙** → enter the FormSaathi URL
+(`http://localhost:3000` by default) and paste the token → **Save**. The panel
+verifies it against `GET /api/v1/auth/session` and shows the account email.
+
+### 5. Walkthrough A — answers you already have
+
+1. Open the page that contains the form.
+2. **Scan page** — the panel lists every fillable field it can see.
+3. Choose **Answers from**: a saved FormSaathi form, **pasted JSON** (an export
+   from the web app, or any flat `{"key": "value"}` object), or your **autofill
+   profile**.
+4. **Find matches** — the review list appears. The note above it says whether
+   Gemma or the local rules produced the matches.
+5. Review each row:
+   - **Matched** rows are ticked, showing the value and a confidence chip.
+   - **Ambiguous** and **missing** rows are unticked, with the guidance below.
+6. **Apply N fields** — values are written with native setters plus `input` and
+   `change` events, every filled field is outlined in green, and the panel
+   reports anything it could not fill. Nothing is submitted.
+7. **Copy JSON** puts the reviewed values on the clipboard.
+
+### 6. Walkthrough B — talk it through
+
+Set **Answers from** to **Ask me in chat**, press **Find matches**, and the panel
+asks one question at a time (Gemma phrases them from the page labels). Each reply
+becomes that field's value and is ticked for review. When the questions run out,
+**Apply N fields** works exactly as in Walkthrough A — so you can talk a form
+through, then copy the JSON or fill the page.
+
+### Ambiguous fields
+
+Three tiers, in order:
+
+1. **Ambiguous match** — the row says *"Recheck this with the form author."* and
+   stays unticked.
+2. **No guidance on the page** (no help text near the field) — *"This form
+   doesn't explain the field. Ask the author what it expects."* with an **Answer
+   in chat** button; your reply becomes the value.
+3. **Still unsure** — a **Most likely** block shows the candidate with **Copy
+   most likely** and the note *"AI can make mistakes. Check this with the form
+   author before submitting."*
+
+### Troubleshooting
+
+| Symptom | Fix |
+| --- | --- |
+| `403 origin_not_allowed`, or "Couldn't reach …" | Add the origin from step 2 and restart the dev server. |
+| "a token needs the forms:read scope" | Issue a new token with `forms:read`. |
+| "I couldn't find any fillable fields" | Reload the tab — content scripts attach on page load. Fields inside iframes, shadow DOM, or custom widgets are not scanned. |
+| A field reports `not_found` on apply | The page re-rendered after scanning; scan again. |
+| `no_option` on a select or radio | The saved value isn't one of the listed choices; the row lists the options. |
+
+### Limits
+
+- Manifest V3 side panel, Chrome/Edge 114+. Not packaged for the Web Store.
+- Up to 40 fields per scan and 60 candidate answers per match.
+- Iframes, shadow DOM, and custom dropdown widgets are out of reach.
+- Output is the reviewed JSON plus the filled page; there is no PDF output yet.
+
+---
+
 ## Security notes
 
 - **Headers:** CSP, HSTS, `X-Frame-Options: DENY`, `X-Content-Type-Options`,
@@ -487,9 +605,10 @@ web session. Context items, the autofill profile, and voice endpoints are live;
   creation; scope checks happen before data access. The autofill profile returns
   only items explicitly marked shareable, and reads are audited with counts and
   metadata only — never field values.
-- **Not yet built:** real OAuth, browser extension, PDF output, template
-  sharing. The voice integration is implemented but has not been exercised
-  against the live ElevenLabs API in this environment (no key configured).
+- **Not yet built:** real OAuth, PDF output, template sharing. The extension in
+  `extension/` is a reference build — unpacked only, not store-distributed. The
+  voice integration is implemented but has not been exercised against the live
+  ElevenLabs API in this environment (no key configured).
 
 ---
 
@@ -514,6 +633,7 @@ autofill route). `npm test` will run the full suite once added.
 | 5 | Templates placeholder · Context Explorer · answer memory/prefill · API tokens · autofillKey | **Done** |
 | 5’ | Whole-form AI planning · field grouping · fewer steps · no generated answers | **Done** |
 | 6 | Tests · security review · extension API docs · final README | Next |
+| Ext | Reference Chrome extension (MV3 side panel, review-then-apply autofill) | **Done** |
 
-Further out: Google OAuth, template sharing, PDF output, Redis cache, browser
-extension.
+Further out: Google OAuth, template sharing, PDF output, Redis cache, store
+distribution for the extension.

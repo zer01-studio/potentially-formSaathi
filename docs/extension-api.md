@@ -146,6 +146,7 @@ If a cookie-session request omits or mismatches the header, the API returns
 | POST | `/api/v1/forms/from-url` | **web session only** | — | Attach a public link; rate-limited per IP and user. |
 | POST | `/api/v1/forms/from-file` | **web session only** | — | Multipart PDF/image upload with magic-byte, size, and page checks. |
 | PATCH | `/api/v1/forms/{id}/answers/{fieldKey}` | **web session only** | — | Save and validate one answer (CSRF required). |
+| POST | `/api/v1/extension/assist` | required | `autofill:read` | Match scanned page fields to saved answers. **See §7.** |
 
 Bearer tokens are **read-only for forms**: they can list, read, and export, but
 cannot create forms or change answers. Context items and the autofill profile
@@ -213,7 +214,85 @@ Returns a **flat, typed JSON map** of only the fields the caller may autofill.
 
 ---
 
-## 7. Example requests
+## 7. Field assist (extension matching)
+
+```http
+POST /api/v1/extension/assist
+Authorization: Bearer fs_<token>
+Content-Type: application/json
+```
+
+Matches the fields visible on a web page to answers the user already owns. The
+client sends field labels — never values typed into the page — plus the
+candidate answers it wants matched.
+
+Request:
+
+```json
+{
+  "page": {
+    "url": "https://example.gov/apply",
+    "title": "Scholarship application",
+    "fields": [
+      { "id": "f1", "label": "Date of birth", "inputType": "date", "required": true },
+      { "id": "f2", "label": "Applicant reference", "inputType": "text" }
+    ]
+  },
+  "candidates": [
+    { "key": "dob", "label": "Date of birth", "value": "12/03/1996", "type": "date" }
+  ]
+}
+```
+
+Response:
+
+```json
+{
+  "apiVersion": "v1",
+  "ok": true,
+  "data": {
+    "mode": "ai",
+    "matches": [
+      {
+        "fieldId": "f1",
+        "candidateKey": "dob",
+        "value": "12/03/1996",
+        "confidence": "high",
+        "status": "matched",
+        "reason": "Matches your date of birth.",
+        "question": null,
+        "guidance": null
+      },
+      {
+        "fieldId": "f2",
+        "candidateKey": null,
+        "value": null,
+        "confidence": "low",
+        "status": "missing",
+        "reason": "We couldn't find your applicant reference number.",
+        "question": "What is your applicant reference number?",
+        "guidance": "Enter the reference number from your acknowledgement slip."
+      }
+    ],
+    "notes": []
+  }
+}
+```
+
+- `mode` is `ai` when Gemma decided the matches, `rules` when the local matcher
+  ran (no key, budget exhausted, or the call failed). `notes` says why.
+- `status`: `matched` may be applied after review; `ambiguous` needs a human
+  decision; `missing` has no usable candidate and comes with a question and
+  guidance. Clients must never auto-submit the page.
+- Candidate **values are never sent to the model.** Gemma only chooses a
+  `candidateKey`; the server maps it back to the stored value and discards any
+  key the client did not supply.
+- Limits: 40 fields and 60 candidates per request. Rate-limited per token
+  (20/min) and per user (30/min), and it counts toward the daily AI budget.
+
+---
+
+## 8. Example requests
 
 ### cURL
 
@@ -256,9 +335,10 @@ curl -s -X DELETE https://formsaathi.example.com/api/v1/tokens/<tokenId> \
 
 ---
 
-## 8. What is intentionally out of scope
+## 9. What is intentionally out of scope
 
-- The browser extension itself (UI, content scripts, form detection).
+- Store distribution and signing for the extension. A reference unpacked MV3
+  build lives in `extension/` and is loaded from disk.
 - Extension sign-in (OAuth-style redirect or pairing code). Until then, tokens
   are issued from the web app.
 - Cookie-based cross-origin calls from the extension. Use bearer tokens;
