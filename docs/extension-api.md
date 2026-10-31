@@ -43,7 +43,8 @@ extension — that reuse the FormSaathi backend with **token authentication**.
 
 Common error codes: `auth_required`, `invalid_credentials`, `csrf_failed`,
 `insufficient_scope`, `origin_not_allowed`, `rate_limited`,
-`validation_failed`, `database_unavailable`, `not_found`, `internal_error`.
+`validation_failed`, `database_unavailable`, `not_found`, `no_form_questions`,
+`internal_error`.
 
 Unknown `/api/v1/...` paths return this error envelope (not HTML), so clients
 can always parse the response.
@@ -136,11 +137,11 @@ If a cookie-session request omits or mismatches the header, the API returns
 
 | Method | Path | Auth | Scopes | Notes |
 | --- | --- | --- | --- | --- |
-| GET | `/api/v1/health` | public | — | Service/database status. |
+| GET | `/api/v1/health` | public | — | Service configuration/database status. `active`/`ready` report enabled integrations, not live third-party uptime; `connected` is the database probe. |
 | GET | `/api/v1/auth/session` | optional | — | Current user, or `{ "user": null }`. Works with a bearer token or cookie session. |
 | POST | `/api/v1/auth/logout` | optional | — | Revokes the cookie session. Bearer clients simply discard their token. |
 | GET | `/api/v1/forms` | required | `forms:read` | List the user’s forms with answer progress. |
-| GET | `/api/v1/forms/{id}` | required | `forms:read` | Form fields, answers, extraction mode, and demo note. |
+| GET | `/api/v1/forms/{id}` | required | `forms:read` | Form fields, answers, extraction mode, `aiEnhanced` flag, and demo note. |
 | GET | `/api/v1/forms/{id}/export` | required | `forms:read` | Validated, structured JSON download (includes `apiVersion`). |
 | POST | `/api/v1/forms/from-url` | **web session only** | — | Attach a public link; rate-limited per IP and user. |
 | POST | `/api/v1/forms/from-file` | **web session only** | — | Multipart PDF/image upload with magic-byte, size, and page checks. |

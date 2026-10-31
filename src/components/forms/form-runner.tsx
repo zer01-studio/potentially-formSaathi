@@ -19,6 +19,7 @@ import {
   Pencil,
 } from "lucide-react";
 import { Button, buttonStyles } from "@/components/ui/button";
+import { CopyButton } from "@/components/ui/copy-button";
 import { Input } from "@/components/ui/input";
 import { apiRequest, ApiClientError } from "@/lib/client/api";
 import type { FormDetailDto, FormFieldDto } from "@/lib/forms/types";
@@ -467,6 +468,11 @@ export function FormRunner({ formId }: { formId: string }) {
             Sample form
           </span>
         ) : null}
+        {form.aiEnhanced ? (
+          <span className="rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 font-mono text-[8.5px] uppercase tracking-[0.12em] text-primary">
+            AI simplified
+          </span>
+        ) : null}
         <span className="rounded-full border border-border bg-card px-2.5 py-1 font-mono text-[8.5px] uppercase tracking-[0.12em] text-muted-foreground">
           {form.answeredCount} of {form.fieldCount} answered
         </span>
@@ -547,8 +553,16 @@ export function FormRunner({ formId }: { formId: string }) {
                   <p className="mt-1.5 text-sm text-muted-foreground">
                     {confirmation.field.plainQuestion}
                   </p>
-                  <div className="mt-4 rounded-2xl border border-border bg-background/60 px-4 py-3 text-[15px] leading-relaxed text-foreground">
-                    {confirmation.value}
+                  <div className="mt-4 rounded-2xl border border-border bg-background/60 p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-mono text-[8.5px] uppercase tracking-[0.14em] text-muted-foreground">
+                        Your answer · paste into the original form
+                      </span>
+                      <CopyButton value={confirmation.value} />
+                    </div>
+                    <pre className="mt-2 whitespace-pre-wrap break-words font-mono text-[13px] leading-relaxed text-foreground">
+                      {confirmation.value}
+                    </pre>
                   </div>
                   <div className="mt-6 flex flex-col gap-2 sm:flex-row">
                     <Button onClick={handleConfirm}>
@@ -723,18 +737,18 @@ export function FormRunner({ formId }: { formId: string }) {
                       <p className="text-[13px] font-medium text-foreground">
                         {item.plainQuestion}
                       </p>
-                      <p
-                        className={cn(
-                          "mt-0.5 break-words text-[12.5px] leading-relaxed",
-                          value ? "text-foreground/80" : "text-muted-foreground",
-                        )}
-                      >
-                        {value
-                          ? value
-                          : missingRequired
-                            ? "Not answered yet"
-                            : "Skipped (optional)"}
-                      </p>
+                      {value ? (
+                        <div className="mt-1.5 flex items-start justify-between gap-2 rounded-lg border border-border/70 bg-background/50 px-2.5 py-1.5">
+                          <pre className="min-w-0 flex-1 whitespace-pre-wrap break-words font-mono text-[12px] leading-relaxed text-foreground/85">
+                            {value}
+                          </pre>
+                          <CopyButton value={value} className="mt-0.5" />
+                        </div>
+                      ) : (
+                        <p className="mt-0.5 break-words text-[12.5px] leading-relaxed text-muted-foreground">
+                          {missingRequired ? "Not answered yet" : "Skipped (optional)"}
+                        </p>
+                      )}
                     </div>
 
                     <button

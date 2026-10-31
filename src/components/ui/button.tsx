@@ -25,7 +25,7 @@ export function buttonStyles(options?: {
   className?: string;
 }): string {
   return cn(
-    "inline-flex select-none items-center justify-center gap-2 rounded-full font-medium",
+    "inline-flex select-none items-center justify-center gap-2 whitespace-nowrap rounded-full font-medium",
     "transition-[transform,background-color,color,box-shadow,border-color] duration-200 ease-out",
     "active:translate-y-px disabled:pointer-events-none disabled:opacity-50",
     variantClasses[options?.variant ?? "primary"],

@@ -4,12 +4,13 @@ import { ApiHttpError } from "@/lib/api/errors";
 import { services } from "@/lib/env";
 import {
   buildFields,
+  dedupeFieldsByCategory,
   inferTitle,
   splitQuestionCandidates,
 } from "@/lib/forms/field-rules";
 import { getDemoForm } from "@/lib/forms/sample-forms";
 import { logWarn } from "@/lib/security/log";
-import { extractionCache } from "./cache";
+import { extractionCache, extractionCacheKey } from "./cache";
 import { recognizeImage } from "./ocr";
 import { readPdfText } from "./pdf-text";
 import type { ExtractionOutcome } from "./results";
@@ -38,7 +39,9 @@ function outcomeFromText(
   const questions = splitQuestionCandidates(text);
   if (questions.length === 0) return null;
 
-  const fields = buildFields(questions.map((question) => ({ question })));
+  const fields = dedupeFieldsByCategory(
+    buildFields(questions.map((question) => ({ question }))),
+  );
   if (fields.length === 0) return null;
 
   return {
@@ -53,7 +56,7 @@ export async function extractImage(
   buffer: Buffer,
   contentHash: string,
 ): Promise<ExtractionOutcome> {
-  const cached = extractionCache.get(contentHash);
+  const cached = extractionCache.get(extractionCacheKey(contentHash));
   if (cached) return { ...cached, demoFallback: false };
 
   if (!services.ocr) {
@@ -63,31 +66,37 @@ export async function extractImage(
     );
   }
 
+  let text: string;
   try {
-    const { text } = await recognizeImage(buffer);
-    const outcome = outcomeFromText(text, "Image form", "ocr");
-
-    if (outcome) {
-      extractionCache.set(contentHash, {
-        title: outcome.title,
-        fields: outcome.fields,
-        mode: "ocr",
-      });
-      return outcome;
-    }
-
-    logWarn("extraction.no_questions", { source: "image", mode: "ocr" });
+    ({ text } = await recognizeImage(buffer));
   } catch (error) {
     logWarn("extraction.ocr_failed", {
       source: "image",
       error: error instanceof Error ? error.name : "unknown",
     });
+    return demoOutcome(
+      contentHash,
+      "OCR couldn’t read that image, so here’s a bundled sample form. Check that OCR is available, or try a PDF or a clearer photo.",
+    );
   }
 
-  return demoOutcome(
-    contentHash,
-    "We couldn’t read clear questions from that image, so here’s a bundled sample form instead.",
-  );
+  const outcome = outcomeFromText(text, "Image form", "ocr");
+
+  if (!outcome) {
+    logWarn("extraction.no_questions", { source: "image", mode: "ocr" });
+    throw new ApiHttpError(
+      422,
+      "no_form_questions",
+      "We read the image, but couldn’t find clear form questions. Try a clearer, tightly-cropped screenshot, or upload the original PDF.",
+    );
+  }
+
+  extractionCache.set(extractionCacheKey(contentHash), {
+    title: outcome.title,
+    fields: outcome.fields,
+    mode: "ocr",
+  });
+  return outcome;
 }
 
 export async function extractPdf(options: {
@@ -98,7 +107,7 @@ export async function extractPdf(options: {
 }): Promise<ExtractionOutcome> {
   const { buffer, filePath, contentHash, maxPages } = options;
 
-  const cached = extractionCache.get(contentHash);
+  const cached = extractionCache.get(extractionCacheKey(contentHash));
   if (cached) return { ...cached, demoFallback: false };
 
   const pdf = await readPdfText(buffer);
@@ -114,13 +123,20 @@ export async function extractPdf(options: {
   if (pdf.text.trim().length >= 20) {
     const outcome = outcomeFromText(pdf.text, "PDF form", "text");
     if (outcome) {
-      extractionCache.set(contentHash, {
+      extractionCache.set(extractionCacheKey(contentHash), {
         title: outcome.title,
         fields: outcome.fields,
         mode: "text",
       });
       return outcome;
     }
+
+    logWarn("extraction.no_questions", { source: "pdf", mode: "text" });
+    throw new ApiHttpError(
+      422,
+      "no_form_questions",
+      "We read this PDF, but couldn’t find clear form questions. Try a PDF that shows the questions clearly.",
+    );
   }
 
   if (!services.ocr) {
@@ -130,29 +146,35 @@ export async function extractPdf(options: {
     );
   }
 
+  let ocrText: string;
   try {
-    const { text } = await ocrPdfPages(filePath, pdf.pageCount);
-    const outcome = outcomeFromText(text, "Scanned PDF form", "ocr");
-
-    if (outcome) {
-      extractionCache.set(contentHash, {
-        title: outcome.title,
-        fields: outcome.fields,
-        mode: "ocr",
-      });
-      return outcome;
-    }
-
-    logWarn("extraction.no_questions", { source: "pdf", mode: "ocr" });
+    ({ text: ocrText } = await ocrPdfPages(filePath, pdf.pageCount));
   } catch (error) {
     logWarn("extraction.ocr_failed", {
       source: "pdf",
       error: error instanceof Error ? error.name : "unknown",
     });
+    return demoOutcome(
+      contentHash,
+      "OCR couldn’t read this scanned PDF, so here’s a bundled sample form. Try a clearer scan or a PDF with selectable text.",
+    );
   }
 
-  return demoOutcome(
-    contentHash,
-    "We couldn’t read clear questions from this PDF, so here’s a bundled sample form instead.",
-  );
+  const outcome = outcomeFromText(ocrText, "Scanned PDF form", "ocr");
+
+  if (!outcome) {
+    logWarn("extraction.no_questions", { source: "pdf", mode: "ocr" });
+    throw new ApiHttpError(
+      422,
+      "no_form_questions",
+      "We read the scanned PDF, but couldn’t find clear form questions. Try a clearer scan, or upload the original PDF if it has selectable text.",
+    );
+  }
+
+  extractionCache.set(extractionCacheKey(contentHash), {
+    title: outcome.title,
+    fields: outcome.fields,
+    mode: "ocr",
+  });
+  return outcome;
 }

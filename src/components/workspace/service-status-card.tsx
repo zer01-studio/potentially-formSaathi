@@ -4,14 +4,22 @@ import { useEffect, useState } from "react";
 import { Activity, LoaderCircle } from "lucide-react";
 import { apiRequest } from "@/lib/client/api";
 
+type ServiceState =
+  | "active"
+  | "configured"
+  | "demo"
+  | "ready"
+  | "connected"
+  | "unavailable";
+
 type HealthResponse = {
   status: "ok" | "degraded";
   time: string;
   services: {
-    gemma: "connected" | "demo";
-    elevenlabs: "connected" | "demo";
-    ocr: "connected" | "demo";
-    database: "connected" | "unavailable";
+    gemma: ServiceState;
+    elevenlabs: ServiceState;
+    ocr: ServiceState;
+    database: ServiceState;
   };
 };
 
@@ -22,14 +30,21 @@ const LABELS: { key: keyof HealthResponse["services"]; label: string }[] = [
   { key: "database", label: "Database" },
 ];
 
-function statusTone(status: string): { dot: string; text: string } {
-  if (status === "connected") {
-    return { dot: "bg-success", text: "Connected" };
+function statusTone(status: ServiceState): { dot: string; text: string } {
+  switch (status) {
+    case "active":
+      return { dot: "bg-success", text: "Active" };
+    case "connected":
+      return { dot: "bg-success", text: "Connected" };
+    case "ready":
+      return { dot: "bg-success", text: "Ready" };
+    case "configured":
+      return { dot: "bg-accent", text: "Configured" };
+    case "demo":
+      return { dot: "bg-warning", text: "Demo fallback" };
+    default:
+      return { dot: "bg-danger", text: "Unavailable" };
   }
-  if (status === "demo") {
-    return { dot: "bg-warning", text: "Demo fallback" };
-  }
-  return { dot: "bg-danger", text: "Unavailable" };
 }
 
 export function ServiceStatusCard() {
@@ -96,6 +111,11 @@ export function ServiceStatusCard() {
           })}
         </ul>
       ) : null}
+
+      <p className="mt-3 text-[10px] leading-relaxed text-muted-foreground">
+        Gemma is used for plain-language rewrites and hints when configured; OCR
+        runs locally; voice arrives in Phase 4.
+      </p>
     </section>
   );
 }

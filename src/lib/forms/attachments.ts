@@ -2,8 +2,9 @@ import "server-only";
 import { connectDb } from "@/lib/db/connect";
 import { Form } from "@/lib/db/models/form";
 import { ApiHttpError } from "@/lib/api/errors";
+import { simplifyFieldsWithGemma } from "@/lib/ai/simplify";
 import { env } from "@/lib/env";
-import { extractionCache } from "@/lib/extraction/cache";
+import { extractionCache, extractionCacheKey } from "@/lib/extraction/cache";
 import { extractImage, extractPdf, hashBuffer } from "@/lib/extraction/files";
 import { extractFormFromHtml } from "@/lib/extraction/html";
 import { fetchFormPage } from "@/lib/extraction/link";
@@ -28,15 +29,29 @@ async function insertForm(options: {
   const { userId, sourceType, sourceLabel, contentHash, outcome } = options;
   await connectDb();
 
+  let fields = outcome.fields;
+  let aiEnhanced = false;
+
+  if (outcome.mode !== "demo" && outcome.fields.length > 0) {
+    const simplified = await simplifyFieldsWithGemma({
+      userId,
+      title: outcome.title,
+      fields: outcome.fields,
+    });
+    fields = simplified.fields;
+    aiEnhanced = simplified.usedAi;
+  }
+
   const created = await Form.create({
     userId,
     sourceType,
     sourceLabel: sourceLabel.slice(0, 120) || "Form",
     contentHash,
     title: outcome.title.slice(0, 160) || "Untitled form",
-    fields: outcome.fields,
+    fields,
     extractionMode: outcome.mode,
     demoFallback: outcome.demoFallback,
+    aiEnhanced,
     ...(outcome.note ? { extractionNote: outcome.note.slice(0, 300) } : {}),
   });
 
@@ -45,6 +60,7 @@ async function insertForm(options: {
     mode: outcome.mode,
     fields: outcome.fields.length,
     demo: outcome.demoFallback,
+    ai: aiEnhanced,
   });
 
   return toFormSummary(created.toObject() as unknown as FormRecordLike, 0);
@@ -55,7 +71,7 @@ export async function createFormFromUrl(options: {
   url: string;
 }): Promise<FormSummaryDto> {
   const page = await fetchFormPage(options.url);
-  const cached = extractionCache.get(page.contentHash);
+  const cached = extractionCache.get(extractionCacheKey(page.contentHash));
 
   let outcome: ExtractionOutcome;
 
@@ -64,7 +80,7 @@ export async function createFormFromUrl(options: {
   } else {
     const parsed = extractFormFromHtml(page.html);
     outcome = { ...parsed, mode: "html", demoFallback: false };
-    extractionCache.set(page.contentHash, {
+    extractionCache.set(extractionCacheKey(page.contentHash), {
       title: parsed.title,
       fields: parsed.fields,
       mode: "html",

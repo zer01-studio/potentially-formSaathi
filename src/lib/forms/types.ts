@@ -37,6 +37,7 @@ export type FormSummaryDto = {
   createdAt: string;
   extractionMode: ExtractionMode;
   demoFallback: boolean;
+  aiEnhanced: boolean;
 };
 
 export type FormDetailDto = FormSummaryDto & {

@@ -7,6 +7,7 @@ import { createFormFromUrl } from "@/lib/forms/attachments";
 import { attachUrlSchema } from "@/lib/validation/forms";
 
 export const runtime = "nodejs";
+export const maxDuration = 120;
 
 export const POST = withApi(
   {
