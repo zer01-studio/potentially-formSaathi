@@ -23,7 +23,7 @@ const JARGON_REPLACEMENTS: Array<[RegExp, string]> = [
 ];
 
 const QUESTION_OVERRIDES: Array<[RegExp, string]> = [
-  [/\b(full\s+name|applicant\s+name|name\s+of\s+applicant)\b/i, "What’s your full name?"],
+  [/\b(full\s+name|applicant\s+name|name\s+of\s+applicant|customer\s+name|your\s+name)\b/i, "What’s your full name?"],
   [/\b(date\s+of\s+birth|birth\s+date|born)\b/i, "When were you born?"],
   [/\b(e-?mail)\b/i, "What’s your email address?"],
   [/\b(phone|mobile|telephone|contact\s+number)\b/i, "What’s the best phone number to reach you?"],

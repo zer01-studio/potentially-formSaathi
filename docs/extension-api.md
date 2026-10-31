@@ -3,11 +3,11 @@
 This document is the contract for API clients — primarily the future browser
 extension — that reuse the FormSaathi backend with **token authentication**.
 
-> **Status:** the API skeleton, envelope, CORS, scopes, CSRF rules, and token
-> resolution are live. Endpoints marked **planned** below are implemented in
-> Phase 5 (context, autofill profile, token management). The contract is written
-> now so the extension can be built against it. The extension itself and its
-> sign-in flow (OAuth-style or pairing code) are out of scope.
+> **Status:** the API skeleton, envelope, CORS, scopes, CSRF rules, token
+> resolution, and the full forms read/attach flow are live. Token **issuing and
+> revoking**, context items, and the autofill profile arrive in Phase 5. The
+> extension itself and its sign-in flow (OAuth-style or pairing code) are out of
+> scope.
 
 ---
 
@@ -139,6 +139,16 @@ If a cookie-session request omits or mismatches the header, the API returns
 | GET | `/api/v1/health` | public | — | Service/database status. |
 | GET | `/api/v1/auth/session` | optional | — | Current user, or `{ "user": null }`. Works with a bearer token or cookie session. |
 | POST | `/api/v1/auth/logout` | optional | — | Revokes the cookie session. Bearer clients simply discard their token. |
+| GET | `/api/v1/forms` | required | `forms:read` | List the user’s forms with answer progress. |
+| GET | `/api/v1/forms/{id}` | required | `forms:read` | Form fields, answers, extraction mode, and demo note. |
+| GET | `/api/v1/forms/{id}/export` | required | `forms:read` | Validated, structured JSON download (includes `apiVersion`). |
+| POST | `/api/v1/forms/from-url` | **web session only** | — | Attach a public link; rate-limited per IP and user. |
+| POST | `/api/v1/forms/from-file` | **web session only** | — | Multipart PDF/image upload with magic-byte, size, and page checks. |
+| PATCH | `/api/v1/forms/{id}/answers/{fieldKey}` | **web session only** | — | Save and validate one answer (CSRF required). |
+
+Bearer tokens are **read-only for forms**: they can list, read, and export, but
+cannot create forms or change answers. Context items and the autofill profile
+are the read paths intended for the extension.
 
 ### Planned (Phase 5)
 
@@ -151,8 +161,6 @@ If a cookie-session request omits or mismatches the header, the API returns
 | DELETE | `/api/v1/context/items` | required | `context:write` | Clear all items for the user. |
 | POST | `/api/v1/tokens` | required (web session) | — | Issue a token for the extension. Returns the raw token once. |
 | DELETE | `/api/v1/tokens/{id}` | required | — | Revoke a token (sets `revokedAt`). |
-| GET | `/api/v1/forms` | required | `forms:read` | List the user’s forms (metadata only). |
-| GET | `/api/v1/forms/{id}` | required | `forms:read` | Form fields + the user’s answers. |
 | GET | `/api/v1/context/autofill-profile` | required | `autofill:read` | **See §6 — the extension’s main read path.** |
 
 ---

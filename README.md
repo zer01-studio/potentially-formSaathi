@@ -10,9 +10,10 @@ Built for students, people with low digital literacy, and anyone facing a
 language barrier — with a **demo mode** that keeps the core flow working when
 external AI or voice services are unavailable.
 
-> **Status: Phase 1 of 6 complete.** Project setup, design foundation, mock
-> auth, MongoDB layer, and the versioned API skeleton are in place. The form
-> workspace (attach → extract → stepper → review) lands in Phase 2. See
+> **Status: Phase 2 of 6 complete.** The workspace now supports links, PDFs,
+> and photos; extraction, per-answer validation, guided questions, review, and
+> JSON export are live. Gemma (Phase 3), voice (Phase 4), templates/context and
+> API tokens (Phase 5), and the test suite (Phase 6) are next. See
 > [Roadmap](#roadmap).
 
 ---
@@ -93,15 +94,20 @@ after the PDF text layer comes back empty.
 │                                                                       │
 │  withApi() wrapper — the only way into the API:                       │
 │    apiVersion envelope · zod parsing · CORS allow-list · CSRF         │
-│    session or bearer auth · scope checks · per-IP rate limits         │
+│    session or bearer auth · scope checks · per-IP/user rate limits    │
 │                                                                       │
 │  AuthProvider interface ── MockCredentialsProvider (bcrypt)           │
 │                          └ GoogleOAuthProvider (stub, TODO)           │
 │                                                                       │
-│  Service layer (Phases 2–4): extraction · validation · Gemma ·        │
-│  ElevenLabs · OCR — every external call has a demo fallback           │
+│  Extraction (live): SSRF-guarded HTML · pdfjs text layer ·            │
+│  pdf-to-img rendering · local Tesseract.js OCR · SHA-256 LRU cache    │
 │                                                                       │
-│  Cache interface (Phase 3): in-memory LRU (Redis later)               │
+│  Rules engine: plain-language rewrites · answer validation ·          │
+│  demo samples — replaced/augmented by Gemma in Phase 3                │
+│                                                                       │
+│  Voice (Phase 4): ElevenLabs with text-only fallback                  │
+│                                                                       │
+│  Cache interface (live for extraction): in-memory LRU (Redis later)   │
 └──────────────────────────────┬────────────────────────────────────────┘
                                │ Mongoose (cached connection)
                                ▼
@@ -207,15 +213,20 @@ npm run build
 | `AUTH_MODE` | No | `mock` | Only `mock` is supported now. Google OAuth is a stub. |
 | `SESSION_SECRET` | No | — | Reserved for session-related signing; opaque session tokens are hashed today. |
 | `AI_ENABLED` | No | `true` | Kill switch. `false` → every AI step uses demo mode. |
-| `RATE_LIMIT_PER_MINUTE` | No | `20` | Sliding-window limit for AI/upload endpoints (Phases 2–3). |
+| `RATE_LIMIT_PER_MINUTE` | No | `20` | Sliding-window limit for form upload/attach endpoints (and AI endpoints from Phase 3). |
 | `DAILY_AI_BUDGET_PER_USER` | No | `100` | Per-user daily AI call budget (Phase 3). |
-| `MAX_UPLOAD_MB` | No | `10` | Upload size limit (Phase 2). |
-| `MAX_PDF_PAGES` | No | `20` | PDF page limit (Phase 2). |
+| `MAX_UPLOAD_MB` | No | `10` | Upload size limit. |
+| `MAX_PDF_PAGES` | No | `20` | PDF page limit. |
 | `CACHE_DRIVER` | No | `memory` | Only `memory` today; Redis deliberately not added. |
 | `EXTENSION_ALLOWED_ORIGINS` | No | — | Comma-separated origins allowed to call `/api/v1/*` cross-origin. Empty → same-origin only. |
 
 Secrets are read only in server modules (`src/lib/env.ts` imports
 `server-only`), and no secret is exposed to the browser bundle.
+
+Optional, not present in `.env.example` (to keep that template to the specified
+keys): `UPLOAD_RETENTION_MINUTES` — uploads are deleted immediately after
+processing by default (`0`); set a positive number of minutes to keep them
+longer.
 
 ---
 
@@ -230,13 +241,37 @@ FormSaathi is designed so that **the core flow always works**:
 - When a service is unavailable, that step switches to a local fallback:
   rule-based question simplification and validation, bundled sample forms, and
   text-only replies.
+- If local OCR is disabled or fails, image/scanned-PDF uploads still create a
+  form using a bundled sample, with a clear on-screen note; the stepper, checks,
+  review, and JSON export stay usable.
 - The workspace shows a **visible banner naming the unavailable services** (see
   `src/components/workspace/demo-banner.tsx`).
 - `AI_ENABLED=false` is a hard kill switch: all AI calls are skipped.
 
-In Phase 1 the availability detection and banner are live; the extraction and AI
-pipelines themselves arrive in Phases 2–4. The health endpoint reports the same
-status: `GET /api/v1/health`.
+Phase 2 turns the extraction fallbacks on; Phase 3 adds Gemma question
+simplification, and Phase 4 adds voice with its own fallback. The health endpoint
+reports the same status: `GET /api/v1/health`.
+
+### How extraction works today
+
+- **Link:** the URL is validated (http/https, standard ports, no credentials),
+  DNS-resolved and checked against private/loopback/link-local/metadata ranges
+  before every hop (max 3 redirects, 10s timeout, 2 MB HTML cap). Form controls
+  are parsed from the HTML, including labels, `required`, selects, and radio
+  groups.
+- **PDF:** the text layer is read first (pdfjs) — page count is enforced before
+  processing. If a PDF has no meaningful text, pages are rendered (pdf-to-img +
+  `@napi-rs/canvas`) and OCR’d locally with Tesseract.js.
+- **Image:** local Tesseract.js OCR.
+- **Simplification:** rule-based for now (dictionary + common-question mappings +
+  type/required heuristics). Phase 3 replaces this step with Gemma under a
+  cache and zod validation.
+- **Caching:** extraction results are cached by the SHA-256 hash of the file or
+  fetched HTML in the in-memory LRU (`src/lib/extraction/cache.ts`), so
+  re-attaching the same form is instant. Hits/misses are logged server-side.
+- **Storage:** uploads are written with random names under `uploads/` (outside
+  `public/`), never the original filename, and deleted after processing
+  (optional retention above).
 
 ---
 
@@ -274,9 +309,16 @@ Live now:
 | POST | `/api/v1/auth/login` | public | Email + password; sets session cookie. Rate-limited per IP. |
 | POST | `/api/v1/auth/logout` | session/token | Deletes the session; CSRF required for cookie sessions. |
 | GET | `/api/v1/auth/session` | optional | Returns the current user or `null`. |
+| POST | `/api/v1/forms/from-url` | session | Reads a public web form into fields. Rate-limited per IP and user. |
+| POST | `/api/v1/forms/from-file` | session | Multipart PDF/image upload; magic-byte, size, and page checks. Rate-limited per IP and user. |
+| GET | `/api/v1/forms` | session or `forms:read` token | Lists the user’s forms with answer progress. |
+| GET | `/api/v1/forms/{id}` | session or `forms:read` token | Form detail: fields, answers, extraction mode, demo note. |
+| PATCH | `/api/v1/forms/{id}/answers/{fieldKey}` | session | Saves and validates one answer. CSRF required. |
+| GET | `/api/v1/forms/{id}/export` | session or `forms:read` token | Validates all answers and downloads the structured JSON file. |
 
-Planned (see `docs/extension-api.md` for the full contract): forms, answers,
-context items, autofill profile, and API token management.
+Token access is read-only for forms (mutations require a web session); context,
+autofill, and token management arrive in Phase 5. See
+`docs/extension-api.md` for the full contract.
 
 **CORS/CSRF rules**
 
@@ -305,9 +347,16 @@ context items, autofill profile, and API token management.
   swap the `RateLimiter` implementation for Redis-backed storage.
 - **Transactions** (account/context deletion) require a MongoDB replica set —
   Atlas provides one by default; the optional local memory server does not.
-- **Uploads (Phase 2):** magic-byte checks, size/page limits, sanitized names,
-  storage outside `public/`, deletion after processing. URL fetching gets SSRF
-  protection (private/link-local/metadata ranges, redirect and timeout limits).
+- **Uploads:** magic-byte type detection (never extension-only), size and PDF
+  page limits, random on-disk names under `uploads/` (outside `public/`),
+  deletion after processing, and no original filename stored on disk.
+- **URL fetching:** DNS resolution plus private/loopback/link-local/CGNAT/
+  metadata/metadata-adjacent blocking, re-checked after each redirect (max 3),
+  standard ports only, 10s timeout, content-type check, 2 MB body cap. Residual
+  risk: DNS rebinding between resolution and fetch (documented limitation; pin
+  the resolved IP with a custom dispatcher if this becomes a hard requirement).
+- **Form data:** answers are validated server-side on save and again on export;
+  API logs never include form text or answers.
 - **Not yet built:** real OAuth, browser extension, PDF output, template
   sharing. Mock auth is intentional for now.
 
@@ -328,8 +377,8 @@ autofill route). `npm test` will run the full suite once added.
 | Phase | Scope | Status |
 | --- | --- | --- |
 | 1 | Setup, docs, design, mock auth, MongoDB, API skeleton, CORS | **Done** |
-| 2 | Attach · validation · extraction (demo first) · stepper · review | Next |
-| 3 | Gemma integration with LRU cache + zod-validated output | Planned |
+| 2 | Attach · validation · extraction · stepper · review · JSON export | **Done** |
+| 3 | Gemma integration with LRU cache + zod-validated output | Next |
 | 4 | Voice toggle · ElevenLabs with fallback · motion polish | Planned |
 | 5 | Templates placeholder · Context Explorer · API tokens · autofillKey | Planned |
 | 6 | Tests · security review · extension API docs · final README | Planned |

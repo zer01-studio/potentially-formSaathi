@@ -35,6 +35,16 @@ export const POST = withApi(
       );
     }
 
+    const maxBodyBytes = env.MAX_UPLOAD_MB * 1024 * 1024 + 64 * 1024;
+    const contentLength = Number(request.headers.get("content-length"));
+    if (Number.isFinite(contentLength) && contentLength > maxBodyBytes) {
+      throw new ApiHttpError(
+        413,
+        "file_too_large",
+        `That upload is larger than the ${env.MAX_UPLOAD_MB} MB limit.`,
+      );
+    }
+
     let formData: FormData;
     try {
       formData = await request.formData();
