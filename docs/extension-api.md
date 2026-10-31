@@ -3,11 +3,11 @@
 This document is the contract for API clients — primarily the future browser
 extension — that reuse the FormSaathi backend with **token authentication**.
 
-> **Status:** the API skeleton, envelope, CORS, scopes, CSRF rules, token
-> resolution, and the full forms read/attach flow are live. Token **issuing and
-> revoking**, context items, and the autofill profile arrive in Phase 5. The
-> extension itself and its sign-in flow (OAuth-style or pairing code) are out of
-> scope.
+> **Status:** fully live as of Phase 5. The API skeleton, envelope, CORS, scopes,
+> CSRF rules, token resolution, forms read/attach, **token issuing/revoking,
+> context items, and the autofill profile** are all implemented and tested.
+> The extension itself and its sign-in flow (OAuth-style or pairing code) are out
+> of scope.
 
 ---
 
@@ -59,7 +59,7 @@ can always parse the response.
 Authorization: Bearer fs_<token>
 ```
 
-- Tokens are created in the app’s settings/Context Explorer (Phase 5), not by the
+- Tokens are created in the app’s **Context Explorer**, not by the
   extension.
 - The raw token is shown **once** when issued. Only a SHA-256 hash is stored in
   the `apiTokens` collection, alongside `userId`, `name`, `scopes`, `createdAt`,
@@ -151,7 +151,7 @@ Bearer tokens are **read-only for forms**: they can list, read, and export, but
 cannot create forms or change answers. Context items and the autofill profile
 are the read paths intended for the extension.
 
-### Planned (Phase 5)
+### Also live (Phase 5)
 
 | Method | Path | Auth | Scopes | Notes |
 | --- | --- | --- | --- | --- |
@@ -240,14 +240,14 @@ if (!body.ok) throw new Error(body.error.message);
 const { fullName, email, phone, dateOfBirth } = body.data;
 ```
 
-### Listing context (planned)
+### Listing context
 
 ```bash
 curl -s https://formsaathi.example.com/api/v1/context/items \
   -H "Authorization: Bearer fs_YOUR_TOKEN"
 ```
 
-### Revoking a token (planned)
+### Revoking a token
 
 ```bash
 curl -s -X DELETE https://formsaathi.example.com/api/v1/tokens/<tokenId> \

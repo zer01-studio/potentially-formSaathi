@@ -10,11 +10,14 @@ Built for students, people with low digital literacy, and anyone facing a
 language barrier — with a **demo mode** that keeps the core flow working when
 external AI or voice services are unavailable.
 
-> **Status: Phase 5 of 6 complete.** Voice replies (ElevenLabs TTS/STT with a
-> greyed-out disabled state when no key is configured), optional AI notes,
+> **Status: Phases 1–5 complete; Phase 6 (tests, security review, final docs) next.**
+> Voice replies (ElevenLabs TTS/STT, greyed out without a key), optional AI notes,
 > Templates placeholder, Context Explorer, answer memory/prefill, API tokens,
-> and the scoped autofill-profile endpoint are implemented. The Vitest suite and
-> final security review are Phase 6. See [Roadmap](#roadmap).
+> and the scoped autofill-profile endpoint are all live.
+> The AI now **reads the whole form in one pass** and groups related fields into as
+> few steps as possible — never generating or guessing answers, only rewiring
+> wording, labels, and grouping. Falls back to one-field-per-step when unavailable.
+> The Vitest suite and final security review are Phase 6. See [Roadmap](#roadmap).
 
 ---
 
@@ -66,6 +69,21 @@ Gemma models are served through the **Gemini API**.
   voice answer is placed in the current question as editable text, so the user
   can correct it before saving. Free-form conversational answers are not mapped
   automatically.
+
+**Whole-form AI planning (live, Phase 5 update):**
+
+- The AI reads **all fields in a single call** instead of rewriting them one by
+  one. It groups related fields into as few steps as possible, assigns a short
+  \step\, \stepTitle\, and concise \label\ to each group.
+- **No answers are generated or guessed** — Gemma only rewrites wording, labels,
+  and grouping. Answer slots arrive empty.
+- Groups are capped at 4 fields per step; a step with only one field uses the
+  question itself as the step title (no label duplication).
+- If the AI is unavailable, returns invalid output, or exhausts the daily budget,
+  the form falls back silently to one-field-per-step — the user sees no error.
+- Verified against \httpbin.org/forms/post\: **6 fields → 2 steps** — “Your
+  contact details” (name, phone, email) and “Your order” (size, delivery time,
+  instructions). \iEnhanced: true\, zero generated answers.
 
 ### ElevenLabs
 
@@ -494,6 +512,7 @@ autofill route). `npm test` will run the full suite once added.
 | 3 | Gemma integration with cache, zod validation, budget, rule fallback | **Done** |
 | 4 | Voice toggle · ElevenLabs TTS/STT · greyed fallback · motion polish | **Done** |
 | 5 | Templates placeholder · Context Explorer · answer memory/prefill · API tokens · autofillKey | **Done** |
+| 5’ | Whole-form AI planning · field grouping · fewer steps · no generated answers | **Done** |
 | 6 | Tests · security review · extension API docs · final README | Next |
 
 Further out: Google OAuth, template sharing, PDF output, Redis cache, browser
