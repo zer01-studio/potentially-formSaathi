@@ -243,10 +243,17 @@ FormSaathi is designed so that **the core flow always works**:
   text-only replies.
 - If local OCR is disabled or fails, image/scanned-PDF uploads still create a
   form using a bundled sample, with a clear on-screen note; the stepper, checks,
-  review, and JSON export stay usable.
+  review, and JSON export stay usable. When OCR runs but finds no recognizable
+  form questions (for example, a screenshot of a login screen), the note says so
+  explicitly and the sample form is marked “Sample form”.
 - The workspace shows a **visible banner naming the unavailable services** (see
   `src/components/workspace/demo-banner.tsx`).
 - `AI_ENABLED=false` is a hard kill switch: all AI calls are skipped.
+
+Health status wording is deliberate: `configured` means credentials are present
+but the integration is not active yet, `ready` means the local OCR engine is
+enabled, `connected` is used only for the database (which is probed), and `demo`
+means the fallback is active.
 
 Phase 2 turns the extraction fallbacks on; Phase 3 adds Gemma question
 simplification, and Phase 4 adds voice with its own fallback. The health endpoint
@@ -304,7 +311,7 @@ Live now:
 
 | Method | Path | Auth | Notes |
 | --- | --- | --- | --- |
-| GET | `/api/v1/health` | public | Service/database availability. |
+| GET | `/api/v1/health` | public | Service configuration/database status. Values: `configured`, `ready`, `connected`, `demo`, `unavailable`. |
 | POST | `/api/v1/auth/signup` | public | Email + password; sets session cookie. Rate-limited per IP. |
 | POST | `/api/v1/auth/login` | public | Email + password; sets session cookie. Rate-limited per IP. |
 | POST | `/api/v1/auth/logout` | session/token | Deletes the session; CSRF required for cookie sessions. |

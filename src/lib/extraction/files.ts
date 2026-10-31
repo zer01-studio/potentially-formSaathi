@@ -77,17 +77,20 @@ export async function extractImage(
     }
 
     logWarn("extraction.no_questions", { source: "image", mode: "ocr" });
+    return demoOutcome(
+      contentHash,
+      "We read the image, but couldn’t find clear form questions. Try a clearer, tightly-cropped screenshot, or upload the original PDF.",
+    );
   } catch (error) {
     logWarn("extraction.ocr_failed", {
       source: "image",
       error: error instanceof Error ? error.name : "unknown",
     });
+    return demoOutcome(
+      contentHash,
+      "OCR couldn’t read that image, so here’s a bundled sample form. Check that OCR is available, or try a PDF or a clearer photo.",
+    );
   }
-
-  return demoOutcome(
-    contentHash,
-    "We couldn’t read clear questions from that image, so here’s a bundled sample form instead.",
-  );
 }
 
 export async function extractPdf(options: {
@@ -144,15 +147,18 @@ export async function extractPdf(options: {
     }
 
     logWarn("extraction.no_questions", { source: "pdf", mode: "ocr" });
+    return demoOutcome(
+      contentHash,
+      "We read the scanned PDF, but couldn’t find clear form questions. Try a clearer scan or a PDF with a text layer.",
+    );
   } catch (error) {
     logWarn("extraction.ocr_failed", {
       source: "pdf",
       error: error instanceof Error ? error.name : "unknown",
     });
+    return demoOutcome(
+      contentHash,
+      "OCR couldn’t read this scanned PDF, so here’s a bundled sample form. Try a clearer scan or a PDF with selectable text.",
+    );
   }
-
-  return demoOutcome(
-    contentHash,
-    "We couldn’t read clear questions from this PDF, so here’s a bundled sample form instead.",
-  );
 }

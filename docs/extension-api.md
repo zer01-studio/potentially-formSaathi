@@ -136,7 +136,7 @@ If a cookie-session request omits or mismatches the header, the API returns
 
 | Method | Path | Auth | Scopes | Notes |
 | --- | --- | --- | --- | --- |
-| GET | `/api/v1/health` | public | — | Service/database status. |
+| GET | `/api/v1/health` | public | — | Service configuration/database status. `configured`/`ready` report configuration, not live third-party uptime; `connected` is the database probe. |
 | GET | `/api/v1/auth/session` | optional | — | Current user, or `{ "user": null }`. Works with a bearer token or cookie session. |
 | POST | `/api/v1/auth/logout` | optional | — | Revokes the cookie session. Bearer clients simply discard their token. |
 | GET | `/api/v1/forms` | required | `forms:read` | List the user’s forms with answer progress. |
