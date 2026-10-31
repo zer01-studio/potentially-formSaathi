@@ -4,7 +4,7 @@ import { Form } from "@/lib/db/models/form";
 import { ApiHttpError } from "@/lib/api/errors";
 import { simplifyFieldsWithGemma } from "@/lib/ai/simplify";
 import { env } from "@/lib/env";
-import { extractionCache } from "@/lib/extraction/cache";
+import { extractionCache, extractionCacheKey } from "@/lib/extraction/cache";
 import { extractImage, extractPdf, hashBuffer } from "@/lib/extraction/files";
 import { extractFormFromHtml } from "@/lib/extraction/html";
 import { fetchFormPage } from "@/lib/extraction/link";
@@ -71,7 +71,7 @@ export async function createFormFromUrl(options: {
   url: string;
 }): Promise<FormSummaryDto> {
   const page = await fetchFormPage(options.url);
-  const cached = extractionCache.get(page.contentHash);
+  const cached = extractionCache.get(extractionCacheKey(page.contentHash));
 
   let outcome: ExtractionOutcome;
 
@@ -80,7 +80,7 @@ export async function createFormFromUrl(options: {
   } else {
     const parsed = extractFormFromHtml(page.html);
     outcome = { ...parsed, mode: "html", demoFallback: false };
-    extractionCache.set(page.contentHash, {
+    extractionCache.set(extractionCacheKey(page.contentHash), {
       title: parsed.title,
       fields: parsed.fields,
       mode: "html",

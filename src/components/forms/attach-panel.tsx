@@ -1,9 +1,10 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowRight,
+  ClipboardPaste,
   FileText,
   Image as ImageIcon,
   Link2,
@@ -63,6 +64,88 @@ export function AttachPanel({
   function chooseFile(nextFile: File | null) {
     setFile(nextFile);
     resetFeedback();
+  }
+
+  const applyIncomingFile = useCallback((incoming: File) => {
+    const name = (incoming.name || "").toLowerCase();
+    const type = (incoming.type || "").toLowerCase();
+    const isAllowedImage =
+      ["image/jpeg", "image/png", "image/webp"].includes(type) ||
+      /\.(jpe?g|png|webp)$/.test(name);
+    const isPdf = type === "application/pdf" || name.endsWith(".pdf");
+
+    setError(null);
+    if (isAllowedImage) {
+      setTab("image");
+      setFile(incoming);
+      return;
+    }
+    if (isPdf) {
+      setTab("pdf");
+      setFile(incoming);
+      return;
+    }
+    setError("Paste a JPG, PNG, or WEBP image, or a PDF.");
+  }, []);
+
+  useEffect(() => {
+    function handlePaste(event: ClipboardEvent) {
+      if (pending) return;
+
+      const items = Array.from(event.clipboardData?.items ?? []);
+      const fileItem = items.find((item) => item.kind === "file");
+      const pastedFile =
+        fileItem?.getAsFile() ?? event.clipboardData?.files?.[0] ?? null;
+
+      if (!pastedFile) return;
+      event.preventDefault();
+      applyIncomingFile(pastedFile);
+    }
+
+    window.addEventListener("paste", handlePaste);
+    return () => window.removeEventListener("paste", handlePaste);
+  }, [pending, applyIncomingFile]);
+
+  async function pasteFromClipboard() {
+    if (pending) return;
+    resetFeedback();
+
+    try {
+      if (!navigator.clipboard?.read) {
+        setError(
+          "Your browser doesn’t allow clipboard reading. Click this panel and press Ctrl+V, or choose a file.",
+        );
+        return;
+      }
+
+      const items = await navigator.clipboard.read();
+      for (const item of items) {
+        const imageType = item.types.find((type) =>
+          ["image/png", "image/jpeg", "image/webp"].includes(type),
+        );
+
+        if (imageType) {
+          const blob = await item.getType(imageType);
+          const extension = imageType === "image/jpeg" ? "jpg" : imageType.split("/")[1];
+          applyIncomingFile(
+            new File([blob], `pasted-screenshot.${extension}`, { type: imageType }),
+          );
+          return;
+        }
+
+        if (item.types.includes("application/pdf")) {
+          const blob = await item.getType("application/pdf");
+          applyIncomingFile(new File([blob], "pasted-form.pdf", { type: "application/pdf" }));
+          return;
+        }
+      }
+
+      setError("No image or PDF found in your clipboard. Copy a screenshot first.");
+    } catch {
+      setError(
+        "Clipboard access was blocked. Click this panel and press Ctrl+V, or choose a file.",
+      );
+    }
   }
 
   async function goToForm(form: FormSummaryDto) {
@@ -297,10 +380,27 @@ export function AttachPanel({
             </div>
           ) : null}
 
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/70 bg-background/40 px-3 py-2">
+            <p className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
+              <ClipboardPaste className="size-3.5" aria-hidden="true" />
+              Copy a screenshot, then press Ctrl+V anywhere here
+            </p>
+            <button
+              type="button"
+              onClick={() => void pasteFromClipboard()}
+              disabled={pending}
+              className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1 font-mono text-[8.5px] uppercase tracking-[0.1em] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+            >
+              <ClipboardPaste className="size-3" aria-hidden="true" />
+              Paste from clipboard
+            </button>
+          </div>
+
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-[11px] leading-relaxed text-muted-foreground">
               Limits: {maxUploadMb} MB, {maxPdfPages} PDF pages. Uploads are
-              stored privately and deleted after reading.
+              stored privately and deleted after reading. Password and payment
+              fields are never extracted.
             </p>
             <Button type="submit" disabled={pending || !file}>
               {pending ? (

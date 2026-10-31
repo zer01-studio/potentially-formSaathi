@@ -295,6 +295,16 @@ reports the same status: `GET /api/v1/health`.
 - **Simplification:** Gemma rewrites questions and suggests validation hints when
   configured (Phase 3); otherwise rule-based dictionary/mapping heuristics are
   used. The original wording is always preserved and available in the stepper.
+- **Screenshot/scan cleanup:** OCR/PDF lines that are legal text, navigation,
+  marketing copy, buttons, or help fragments are ignored. Label+placeholder pairs
+  such as “Email” / “Enter your email” are merged into one field. Password,
+  payment, and other secret fields are deliberately never extracted.
+- **Copy answers:** the confirmation step and review list show each saved answer
+  in a copyable code block with a Copy button, ready to paste into the original
+  form.
+- **Paste a screenshot:** the attach panel accepts images/PDFs pasted from the
+  clipboard with Ctrl+V (or “Paste from clipboard”) and switches to the matching
+  Photo/PDF tab.
 - **Caching:** extraction results are cached by the SHA-256 hash of the file or
   fetched HTML in the in-memory LRU (`src/lib/extraction/cache.ts`), so
   re-attaching the same form is instant. Hits/misses are logged server-side.

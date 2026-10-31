@@ -23,10 +23,12 @@ const JARGON_REPLACEMENTS: Array<[RegExp, string]> = [
 ];
 
 const QUESTION_OVERRIDES: Array<[RegExp, string]> = [
+  [/\b(user\s*name|username)\b/i, "What username would you like?"],
   [/\b(full\s+name|applicant\s+name|name\s+of\s+applicant|customer\s+name|your\s+name)\b/i, "What’s your full name?"],
   [/\b(date\s+of\s+birth|birth\s+date|born)\b/i, "When were you born?"],
   [/\b(e-?mail)\b/i, "What’s your email address?"],
   [/\b(phone|mobile|telephone|contact\s+number)\b/i, "What’s the best phone number to reach you?"],
+  [/\b(country|region)\b/i, "Which country or region are you in?"],
   [/\b(address|residence|where\s+do\s+you\s+live)\b/i, "Where do you live?"],
   [/\b(annual\s+(household\s+)?income|yearly\s+income|salary|earnings)\b/i, "How much does your household earn each year?"],
   [/\bwhy\b.*\b(scholarship|grant|funding)\b/i, "Why do you need this scholarship?"],
@@ -54,7 +56,67 @@ const TYPE_KEYWORDS: Array<[RegExp, FieldType]> = [
 ];
 
 const REQUIRED_HINTS =
-  /\b(full\s+name|name|date\s+of\s+birth|birth|e-?mail|phone|mobile|telephone|contact\s+number|address|pin\s*code|signature|income|salary|amount)\b/i;
+  /\b(full\s+name|name|username|date\s+of\s+birth|birth|e-?mail|phone|mobile|telephone|contact\s+number|address|country|region|pin\s*code|signature|income|salary|amount)\b/i;
+
+const SENSITIVE_FIELD_PATTERN =
+  /\b(password|passcode|one[-\s]?time|otp|verification\s+code|cvv|cvc|card\s+number|credit\s+card|debit\s+card|social\s+security|ssn|routing\s+number|account\s+number|security\s+code)\b/i;
+
+const NON_FIELD_PATTERN =
+  /\b(privacy|terms?|policy|policies|cookies?|copyright|legal|licen[cs]e|agreement|guidelines|all\s+rights\s+reserved|sign\s+in|log\s+in|sign\s+up|signup|sign-up|create\s+(an\s+)?account|forgot|already\s+have\s+an\s+account|continue\s+with|newsletter|product\s+updates?|announcements?|marketing|occasional|subscribe|promotions?|preferences?|compliance|lowercase|uppercase|alphanumeric|hyphens?|submit\s+feedback|need\s+help|get\s+help|contact\s+us|contact\s+support|about\s+us|about\s+github)\b/i;
+
+const BUTTON_LABEL_PATTERN =
+  /^(sign\s+up(\s+for\s+\w+)?|sign\s+in(\s+to\s+\w+)?|log\s+in|register(\s+now)?|create\s+(an\s+)?account|continue|next|back|submit|verify|cancel|close|accept|decline|allow|manage|download|install|get\s+started|start\s+for\s+free|try\s+github(\s+free)?|see\s+all|show\s+more)$/i;
+
+const URL_OR_EMAIL_EXAMPLE = /\bhttps?:\/\/|www\.|@[a-z0-9.-]+\.[a-z]{2,}/i;
+
+const CATEGORY_PATTERNS: Array<[RegExp, string]> = [
+  [/\b(e-?mail)\b/i, "email"],
+  [/\b(user\s*name|username)\b/i, "username"],
+  [/\b(phone|mobile|telephone|contact\s+number)\b/i, "phone"],
+  [/\b(date\s+of\s+birth|birth\s*date|dob|birthday)\b/i, "date"],
+  [/\b(address|residence)\b/i, "address"],
+  [/\b(country|region)\b/i, "country"],
+  [/\b(pin\s*code|postal\s+code|postcode|zip)\b/i, "postal"],
+  [/\b(city|town)\b/i, "city"],
+  [/\b(state|province)\b/i, "state"],
+  [/\b(company|organisation|organization|employer)\b/i, "company"],
+  [/\b(website|url|portfolio)\b/i, "website"],
+  [/\b(full\s+name|legal\s+name|your\s+name|name)\b/i, "name"],
+];
+
+export function fieldCategory(question: string): string | null {
+  const text = question.toLowerCase();
+  for (const [pattern, category] of CATEGORY_PATTERNS) {
+    if (pattern.test(text)) return category;
+  }
+  return null;
+}
+
+/** OCR often reads both the label and placeholder; keep one per field category. */
+export function dedupeFieldsByCategory(fields: FormFieldDto[]): FormFieldDto[] {
+  const seen = new Set<string>();
+  return fields.filter((field) => {
+    const category = fieldCategory(field.question);
+    if (!category) return true;
+    if (seen.has(category)) return false;
+    seen.add(category);
+    return true;
+  });
+}
+
+function shouldDiscardLine(line: string): boolean {
+  if (/[,;]$/.test(line)) return true;
+  if (SENSITIVE_FIELD_PATTERN.test(line)) return true;
+  if (NON_FIELD_PATTERN.test(line)) return true;
+  if (BUTTON_LABEL_PATTERN.test(line)) return true;
+  if (URL_OR_EMAIL_EXAMPLE.test(line)) return true;
+
+  const words = line.split(/\s+/).filter(Boolean).length;
+  const endsWithSentencePunctuation = /[.!]$/.test(line) && !/\?$/.test(line);
+  if (endsWithSentencePunctuation && words > 8) return true;
+
+  return false;
+}
 
 const MAX_LENGTHS: Record<FieldType, number> = {
   text: 250,
@@ -208,10 +270,11 @@ export function splitQuestionCandidates(text: string): string[] {
     if (QUESTION_STOPWORDS.test(withoutNumber)) continue;
     if (/^\d+$/.test(withoutNumber)) continue;
     if (withoutNumber.length < 4 || withoutNumber.length > 160) continue;
+    if (shouldDiscardLine(withoutNumber)) continue;
 
     const endsLikeQuestion = /[:?]$/.test(withoutNumber);
     const hasKeyword =
-      /\b(name|date|birth|dob|address|email|e-mail|phone|mobile|telephone|number|income|amount|age|gender|nationality|occupation|employer|signature|course|school|college|university|reason|statement|details|pin|postal|city|state|country|why|how|what|which|when|where)\b/i.test(
+      /\b(name|username|user\s*name|date|birth|dob|address|email|e-mail|phone|mobile|telephone|number|income|amount|age|gender|nationality|occupation|employer|signature|course|school|college|university|reason|statement|details|pin|postal|city|state|country|region|why|how|what|which|when|where)\b/i.test(
         withoutNumber,
       );
     const hasNumbering = /^\s*(\d{1,2}|[a-zA-Z])[).:]\s+/.test(line);
@@ -220,6 +283,7 @@ export function splitQuestionCandidates(text: string): string[] {
 
     const normalized = stripLeadingNumbering(withoutNumber)
       .replace(/[\s:]+$/, "")
+      .replace(/[’'`"”]+$/g, "")
       .trim();
     const dedupeKey = normalized.toLowerCase();
     if (!normalized || seen.has(dedupeKey)) continue;
@@ -240,7 +304,7 @@ export function inferTitle(text: string, fallback: string): string {
 
   for (const line of lines.slice(0, 12)) {
     if (
-      /\b(form|application|registration|enrolment|enrollment|questionnaire|declaration|request|record)\b/i.test(
+      /\b(form|application|registration|enrolment|enrollment|questionnaire|declaration|request|record|sign\s*up|create\s+(an\s+)?account|register)\b/i.test(
         line,
       ) &&
       line.length >= 5 &&
@@ -251,8 +315,5 @@ export function inferTitle(text: string, fallback: string): string {
     }
   }
 
-  const firstUsable = lines.find(
-    (line) => line.length >= 5 && line.length <= 100 && !line.endsWith(":"),
-  );
-  return firstUsable?.slice(0, 120) || fallback;
+  return fallback;
 }

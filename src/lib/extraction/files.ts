@@ -4,12 +4,13 @@ import { ApiHttpError } from "@/lib/api/errors";
 import { services } from "@/lib/env";
 import {
   buildFields,
+  dedupeFieldsByCategory,
   inferTitle,
   splitQuestionCandidates,
 } from "@/lib/forms/field-rules";
 import { getDemoForm } from "@/lib/forms/sample-forms";
 import { logWarn } from "@/lib/security/log";
-import { extractionCache } from "./cache";
+import { extractionCache, extractionCacheKey } from "./cache";
 import { recognizeImage } from "./ocr";
 import { readPdfText } from "./pdf-text";
 import type { ExtractionOutcome } from "./results";
@@ -38,7 +39,9 @@ function outcomeFromText(
   const questions = splitQuestionCandidates(text);
   if (questions.length === 0) return null;
 
-  const fields = buildFields(questions.map((question) => ({ question })));
+  const fields = dedupeFieldsByCategory(
+    buildFields(questions.map((question) => ({ question }))),
+  );
   if (fields.length === 0) return null;
 
   return {
@@ -53,7 +56,7 @@ export async function extractImage(
   buffer: Buffer,
   contentHash: string,
 ): Promise<ExtractionOutcome> {
-  const cached = extractionCache.get(contentHash);
+  const cached = extractionCache.get(extractionCacheKey(contentHash));
   if (cached) return { ...cached, demoFallback: false };
 
   if (!services.ocr) {
@@ -88,7 +91,7 @@ export async function extractImage(
     );
   }
 
-  extractionCache.set(contentHash, {
+  extractionCache.set(extractionCacheKey(contentHash), {
     title: outcome.title,
     fields: outcome.fields,
     mode: "ocr",
@@ -104,7 +107,7 @@ export async function extractPdf(options: {
 }): Promise<ExtractionOutcome> {
   const { buffer, filePath, contentHash, maxPages } = options;
 
-  const cached = extractionCache.get(contentHash);
+  const cached = extractionCache.get(extractionCacheKey(contentHash));
   if (cached) return { ...cached, demoFallback: false };
 
   const pdf = await readPdfText(buffer);
@@ -120,7 +123,7 @@ export async function extractPdf(options: {
   if (pdf.text.trim().length >= 20) {
     const outcome = outcomeFromText(pdf.text, "PDF form", "text");
     if (outcome) {
-      extractionCache.set(contentHash, {
+      extractionCache.set(extractionCacheKey(contentHash), {
         title: outcome.title,
         fields: outcome.fields,
         mode: "text",
@@ -168,7 +171,7 @@ export async function extractPdf(options: {
     );
   }
 
-  extractionCache.set(contentHash, {
+  extractionCache.set(extractionCacheKey(contentHash), {
     title: outcome.title,
     fields: outcome.fields,
     mode: "ocr",

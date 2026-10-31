@@ -43,7 +43,8 @@ extension — that reuse the FormSaathi backend with **token authentication**.
 
 Common error codes: `auth_required`, `invalid_credentials`, `csrf_failed`,
 `insufficient_scope`, `origin_not_allowed`, `rate_limited`,
-`validation_failed`, `database_unavailable`, `not_found`, `internal_error`.
+`validation_failed`, `database_unavailable`, `not_found`, `no_form_questions`,
+`internal_error`.
 
 Unknown `/api/v1/...` paths return this error envelope (not HTML), so clients
 can always parse the response.

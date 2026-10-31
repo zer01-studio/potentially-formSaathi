@@ -54,7 +54,7 @@ function applySuggestion(
     type,
     ...(helpText ? { helpText } : {}),
     ...(typeof maxLength === "number" ? { maxLength } : {}),
-    required: suggestion.required ?? field.required,
+    required: field.required || suggestion.required === true,
   };
 }
 
