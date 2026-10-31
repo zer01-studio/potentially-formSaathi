@@ -40,6 +40,11 @@ function readCookie(name: string): string | null {
   return found ? decodeURIComponent(found.slice(prefix.length)) : null;
 }
 
+export function csrfHeaders(): Record<string, string> {
+  const token = readCookie(CSRF_COOKIE);
+  return token ? { [CSRF_HEADER]: token } : {};
+}
+
 export async function apiRequest<T>(
   path: string,
   options: {

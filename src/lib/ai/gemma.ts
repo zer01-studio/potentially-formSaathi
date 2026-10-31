@@ -13,23 +13,25 @@ export class GemmaError extends Error {
   }
 }
 
-const simplificationItemSchema = z
+const formPlanItemSchema = z
   .object({
     id: z.number().int().nonnegative(),
     plainQuestion: z.string().trim().min(1).max(220),
+    label: z.string().trim().min(1).max(60).nullish(),
     helpText: z.string().trim().max(160).nullish(),
     type: z.enum(FIELD_TYPES).nullish(),
-    required: z.boolean().nullish(),
+    step: z.number().int().nonnegative().max(29).nullish(),
+    stepTitle: z.string().trim().max(80).nullish(),
   })
   .strict();
 
-const simplificationResponseSchema = z
+const formPlanResponseSchema = z
   .object({
-    questions: z.array(simplificationItemSchema).min(1).max(30),
+    questions: z.array(formPlanItemSchema).min(1).max(30),
   })
   .strict();
 
-export type SimplificationItem = z.infer<typeof simplificationItemSchema>;
+export type FormPlanItem = z.infer<typeof formPlanItemSchema>;
 
 type GemmaPayload = {
   candidates?: Array<{
@@ -128,9 +130,9 @@ async function requestGenerationWithRetry(prompt: string): Promise<string> {
   }
 }
 
-export async function generateSimplifications(
+export async function generateFormPlan(
   prompt: string,
-): Promise<SimplificationItem[]> {
+): Promise<FormPlanItem[]> {
   let lastFailure: unknown;
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -142,7 +144,7 @@ export async function generateSimplifications(
     const text = await requestGenerationWithRetry(attemptPrompt);
 
     try {
-      const parsed = simplificationResponseSchema.parse(extractJsonObject(text));
+      const parsed = formPlanResponseSchema.parse(extractJsonObject(text));
       return parsed.questions;
     } catch (error) {
       lastFailure = error;

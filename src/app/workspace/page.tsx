@@ -23,8 +23,8 @@ const EXPECTATIONS = [
   },
   {
     icon: Mic,
-    title: "Voice comes later",
-    body: "Type for now; spoken questions and answers arrive in Phase 4.",
+    title: "Voice, when configured",
+    body: "Turn on Voice replies to hear questions and speak answers; typing always works.",
   },
   {
     icon: Lock,

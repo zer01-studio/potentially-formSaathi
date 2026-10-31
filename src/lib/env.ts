@@ -71,6 +71,11 @@ export const services: ServicesStatus = {
   database: Boolean(env.MONGODB_URI),
 };
 
+export const voiceCapabilities = {
+  tts: Boolean(env.ELEVENLABS_API_KEY) && Boolean(env.ELEVENLABS_VOICE_ID),
+  stt: Boolean(env.ELEVENLABS_API_KEY),
+};
+
 export function unavailableServiceLabels(): string[] {
   const labels: string[] = [];
   if (!services.gemma) labels.push("Gemma AI");

@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import {
   corsHeaders,
   corsPreflightHeaders,
+  getRequestOrigin,
   isOriginAllowed,
 } from "@/lib/security/cors";
 import { CSRF_COOKIE } from "@/lib/security/constants";
@@ -14,7 +15,7 @@ export function proxy(request: NextRequest) {
   if (pathname.startsWith("/api/")) {
     if (pathname.startsWith("/api/v1/") && request.method === "OPTIONS") {
       const origin = request.headers.get("origin");
-      const selfOrigin = request.nextUrl.origin;
+      const selfOrigin = getRequestOrigin(request);
 
       if (!origin || !isOriginAllowed(origin, selfOrigin)) {
         return NextResponse.json(

@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { motion } from "motion/react";
 import {
   ArrowLeft,
   ArrowRight,
+  AudioLines,
   Check,
   ChevronDown,
   ChevronLeft,
@@ -17,10 +18,13 @@ import {
   LoaderCircle,
   Mic,
   Pencil,
+  Square,
+  Volume2,
 } from "lucide-react";
 import { Button, buttonStyles } from "@/components/ui/button";
 import { CopyButton } from "@/components/ui/copy-button";
 import { Input } from "@/components/ui/input";
+import { useFormVoice } from "@/components/voice/use-form-voice";
 import { apiRequest, ApiClientError } from "@/lib/client/api";
 import type { FormDetailDto, FormFieldDto } from "@/lib/forms/types";
 import { cn } from "@/lib/utils";
@@ -29,12 +33,56 @@ type LoadState = "loading" | "ready" | "error";
 type Mode = "questions" | "review";
 type Notice = { tone: "success" | "error"; message: string };
 
-function firstOpenIndex(form: FormDetailDto): number {
-  const requiredMissing = form.fields.findIndex(
-    (field) => field.required && !form.answers[field.key],
+type FormStep = {
+  key: string;
+  title: string;
+  fields: FormFieldDto[];
+};
+
+function buildSteps(fields: FormFieldDto[]): FormStep[] {
+  const steps: FormStep[] = [];
+  const byKey = new Map<string, FormStep>();
+
+  for (const field of fields) {
+    const stepKey =
+      typeof field.step === "number" ? `step-${field.step}` : `field-${field.key}`;
+    const existing = byKey.get(stepKey);
+    if (existing) {
+      existing.fields.push(field);
+      continue;
+    }
+
+    const step: FormStep = {
+      key: stepKey,
+      title: field.stepTitle?.trim() || field.plainQuestion,
+      fields: [field],
+    };
+    byKey.set(stepKey, step);
+    steps.push(step);
+  }
+
+  return steps;
+}
+
+function draftFor(form: FormDetailDto, field: FormFieldDto): string {
+  return form.answers[field.key] ?? form.suggestedAnswers?.[field.key] ?? "";
+}
+
+function draftsFor(
+  form: FormDetailDto,
+  fields: FormFieldDto[],
+): Record<string, string> {
+  return Object.fromEntries(fields.map((field) => [field.key, draftFor(form, field)]));
+}
+
+function firstOpenStepIndex(form: FormDetailDto, steps: FormStep[]): number {
+  const requiredMissing = steps.findIndex((step) =>
+    step.fields.some((field) => field.required && !form.answers[field.key]),
   );
   if (requiredMissing >= 0) return requiredMissing;
-  return form.fields.findIndex((field) => !form.answers[field.key]);
+  return steps.findIndex((step) =>
+    step.fields.some((field) => !form.answers[field.key]),
+  );
 }
 
 function applyAnswer(form: FormDetailDto, key: string, value: string): FormDetailDto {
@@ -150,15 +198,16 @@ function AnswerInput({
 }
 
 function initialView(form: FormDetailDto): {
-  index: number;
-  draft: string;
+  stepIndex: number;
+  drafts: Record<string, string>;
   mode: Mode;
 } {
-  const open = firstOpenIndex(form);
-  if (open < 0) return { index: 0, draft: "", mode: "review" };
+  const steps = buildSteps(form.fields);
+  const open = firstOpenStepIndex(form, steps);
+  if (open < 0) return { stepIndex: 0, drafts: {}, mode: "review" };
   return {
-    index: open,
-    draft: form.answers[form.fields[open].key] ?? "",
+    stepIndex: open,
+    drafts: draftsFor(form, steps[open].fields),
     mode: "questions",
   };
 }
@@ -169,17 +218,49 @@ export function FormRunner({ formId }: { formId: string }) {
   const [form, setForm] = useState<FormDetailDto | null>(null);
 
   const [mode, setMode] = useState<Mode>("questions");
-  const [index, setIndex] = useState(0);
-  const [draft, setDraft] = useState("");
+  const [stepIndex, setStepIndex] = useState(0);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [returnToReview, setReturnToReview] = useState(false);
   const [confirmation, setConfirmation] = useState<{
-    field: FormFieldDto;
-    value: string;
+    title: string;
+    values: Array<{ field: FormFieldDto; value: string }>;
   } | null>(null);
   const [saving, setSaving] = useState(false);
-  const [fieldError, setFieldError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [exporting, setExporting] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
+
+  const steps = form ? buildSteps(form.fields) : [];
+  const step = steps[stepIndex] ?? null;
+  const singleField = step && step.fields.length === 1 ? step.fields[0] : null;
+  const spokenText = confirmation
+    ? "Saved. Does this look right?"
+    : (step?.title ?? "");
+
+  const voice = useFormVoice({
+    onTranscript: (text) => {
+      if (!step) return;
+      const target =
+        step.fields.find((item) => item.type !== "choice") ?? step.fields[0];
+      setDrafts((current) => ({ ...current, [target.key]: text }));
+      setFieldErrors({});
+    },
+  });
+  const { canSpeak: voiceCanSpeak, speak: speakAloud } = voice;
+  const lastSpokenKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!voiceCanSpeak || mode !== "questions" || !step) return;
+
+    const key = confirmation
+      ? `confirmation:${confirmation.title}:${confirmation.values
+          .map((entry) => entry.value)
+          .join("|")}`
+      : `step:${step.key}`;
+    if (lastSpokenKeyRef.current === key) return;
+    lastSpokenKeyRef.current = key;
+    void speakAloud(spokenText);
+  }, [confirmation, mode, spokenText, step, voiceCanSpeak, speakAloud]);
 
   const fetchForm = useCallback(async (signal?: AbortSignal) => {
     const data = await apiRequest<{ form: FormDetailDto }>(
@@ -196,8 +277,8 @@ export function FormRunner({ formId }: { formId: string }) {
       .then((nextForm) => {
         setForm(nextForm);
         const view = initialView(nextForm);
-        setIndex(view.index);
-        setDraft(view.draft);
+        setStepIndex(view.stepIndex);
+        setDrafts(view.drafts);
         setMode(view.mode);
         setLoadState("ready");
       })
@@ -221,8 +302,8 @@ export function FormRunner({ formId }: { formId: string }) {
       .then((nextForm) => {
         setForm(nextForm);
         const view = initialView(nextForm);
-        setIndex(view.index);
-        setDraft(view.draft);
+        setStepIndex(view.stepIndex);
+        setDrafts(view.drafts);
         setMode(view.mode);
         setLoadState("ready");
       })
@@ -236,26 +317,26 @@ export function FormRunner({ formId }: { formId: string }) {
       });
   }
 
-  function goToField(nextIndex: number) {
-    if (!form) return;
-    setIndex(nextIndex);
-    setDraft(form.answers[form.fields[nextIndex].key] ?? "");
-    setFieldError(null);
+  function goToStep(nextIndex: number, currentForm: FormDetailDto) {
+    const nextSteps = buildSteps(currentForm.fields);
+    const target = nextSteps[nextIndex];
+    if (!target) return;
+    setStepIndex(nextIndex);
+    setDrafts(draftsFor(currentForm, target.fields));
+    setFieldErrors({});
     setConfirmation(null);
     setMode("questions");
   }
 
-  function advanceFrom(currentIndex: number, currentForm: FormDetailDto) {
-    const next = currentForm.fields.findIndex(
-      (field, fieldIndex) =>
-        fieldIndex > currentIndex && !currentForm.answers[field.key],
+  function advanceFrom(currentStepIndex: number, currentForm: FormDetailDto) {
+    const currentSteps = buildSteps(currentForm.fields);
+    const next = currentSteps.findIndex(
+      (candidate, candidateIndex) =>
+        candidateIndex > currentStepIndex &&
+        candidate.fields.some((item) => !currentForm.answers[item.key]),
     );
     if (next >= 0) {
-      setIndex(next);
-      setDraft(currentForm.answers[currentForm.fields[next].key] ?? "");
-      setFieldError(null);
-      setConfirmation(null);
-      setMode("questions");
+      goToStep(next, currentForm);
       return;
     }
     setConfirmation(null);
@@ -263,33 +344,77 @@ export function FormRunner({ formId }: { formId: string }) {
   }
 
   async function handleSave() {
-    if (!form || !field || saving) return;
+    if (!form || !step || saving) return;
 
-    if (!draft.trim() && !field.required) {
+    const missingRequired = step.fields.filter(
+      (item) => item.required && !(drafts[item.key] ?? "").trim(),
+    );
+    if (missingRequired.length > 0) {
+      setFieldErrors(
+        Object.fromEntries(
+          missingRequired.map((item) => [
+            item.key,
+            "Please answer this required question.",
+          ]),
+        ),
+      );
+      return;
+    }
+
+    const targets = step.fields.filter(
+      (item) => (drafts[item.key] ?? "").trim() || form.answers[item.key],
+    );
+    if (targets.length === 0) {
       handleSkip();
       return;
     }
 
     setSaving(true);
-    setFieldError(null);
+    setFieldErrors({});
     setNotice(null);
 
-    try {
-      const data = await apiRequest<{
-        answer: { fieldKey: string; value: string; updatedAt: string | null };
-      }>(`/api/v1/forms/${formId}/answers/${field.key}`, {
-        method: "PATCH",
-        body: { value: draft },
-      });
+    let currentForm = form;
+    let activeKey = targets[0]?.key ?? "";
+    const saved: Array<{ field: FormFieldDto; value: string }> = [];
 
-      const updated = applyAnswer(form, data.answer.fieldKey, data.answer.value);
-      setForm(updated);
-      setConfirmation({ field, value: data.answer.value });
-    } catch (error) {
-      if (error instanceof ApiClientError) {
-        setFieldError(error.fieldErrors?.[field.key] ?? error.message);
+    try {
+      for (const target of targets) {
+        activeKey = target.key;
+        const data = await apiRequest<{
+          answer: { fieldKey: string; value: string; updatedAt: string | null };
+        }>(`/api/v1/forms/${formId}/answers/${target.key}`, {
+          method: "PATCH",
+          body: { value: drafts[target.key] ?? "" },
+        });
+
+        currentForm = applyAnswer(
+          currentForm,
+          data.answer.fieldKey,
+          data.answer.value,
+        );
+        if (data.answer.value) {
+          saved.push({ field: target, value: data.answer.value });
+        }
+      }
+
+      setForm(currentForm);
+      if (saved.length > 0) {
+        setConfirmation({ title: step.title, values: saved });
       } else {
-        setFieldError("We couldn’t save that answer. Please try again.");
+        advanceFrom(stepIndex, currentForm);
+      }
+    } catch (error) {
+      setForm(currentForm);
+      if (error instanceof ApiClientError) {
+        if (error.fieldErrors) {
+          setFieldErrors(error.fieldErrors);
+        } else {
+          setFieldErrors({ [activeKey]: error.message });
+        }
+      } else {
+        setFieldErrors({
+          [activeKey]: "We couldn’t save those answers. Please try again.",
+        });
       }
     } finally {
       setSaving(false);
@@ -304,28 +429,31 @@ export function FormRunner({ formId }: { formId: string }) {
       setMode("review");
       return;
     }
-    advanceFrom(index, form);
+    advanceFrom(stepIndex, form);
   }
 
   function handleSkip() {
-    if (!form || !field || field.required) return;
-    setFieldError(null);
+    if (!form || !step) return;
+    if (step.fields.some((item) => item.required)) return;
+    setFieldErrors({});
     setConfirmation(null);
     if (returnToReview) {
       setReturnToReview(false);
       setMode("review");
       return;
     }
-    advanceFrom(index, form);
+    advanceFrom(stepIndex, form);
   }
 
   function handleEditFromReview(target: FormFieldDto) {
     if (!form) return;
-    const targetIndex = form.fields.findIndex((field) => field.key === target.key);
-    if (targetIndex < 0) return;
-    setIndex(targetIndex);
-    setDraft(form.answers[target.key] ?? "");
-    setFieldError(null);
+    const targetStepIndex = steps.findIndex((item) =>
+      item.fields.some((field) => field.key === target.key),
+    );
+    if (targetStepIndex < 0) return;
+    setStepIndex(targetStepIndex);
+    setDrafts(draftsFor(form, steps[targetStepIndex].fields));
+    setFieldErrors({});
     setConfirmation(null);
     setNotice(null);
     setReturnToReview(true);
@@ -334,15 +462,26 @@ export function FormRunner({ formId }: { formId: string }) {
 
   function backToQuestions() {
     if (!form) return;
-    const open = firstOpenIndex(form);
+    const open = firstOpenStepIndex(form, steps);
     const target = open >= 0 ? open : 0;
     setReturnToReview(false);
-    goToField(target);
+    goToStep(target, form);
   }
 
   function previousQuestion() {
-    if (index <= 0) return;
-    goToField(index - 1);
+    if (!form || stepIndex <= 0) return;
+    goToStep(stepIndex - 1, form);
+  }
+
+  function updateDraft(key: string, value: string) {
+    setDrafts((current) => ({ ...current, [key]: value }));
+    setFieldErrors((current) => {
+      if (!(key in current)) return current;
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+    if (voice.voiceError) voice.clearVoiceError();
   }
 
   async function handleExport() {
@@ -440,7 +579,6 @@ export function FormRunner({ formId }: { formId: string }) {
     );
   }
 
-  const field = form.fields[index] ?? null;
   const requiredMissing = form.fields.filter(
     (item) => item.required && !form.answers[item.key],
   ).length;
@@ -495,22 +633,57 @@ export function FormRunner({ formId }: { formId: string }) {
         </div>
       ) : null}
 
-      {mode === "questions" && field ? (
+      {form.aiInstructions ? (
+        <details className="group mt-4 rounded-2xl border border-border/70 bg-card/50 px-4 py-3">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-2 font-mono text-[9.5px] uppercase tracking-[0.14em] text-muted-foreground">
+            Notes for the assistant
+            <ChevronDown
+              className="size-3.5 transition-transform duration-200 group-open:rotate-180"
+              aria-hidden="true"
+            />
+          </summary>
+          <p className="mt-2 text-[12px] leading-relaxed text-foreground/80">
+            {form.aiInstructions}
+          </p>
+        </details>
+      ) : null}
+
+      {mode === "questions" && step ? (
         <div className="mt-6 overflow-hidden rounded-[28px] border border-border bg-card shadow-lift">
           <div className="flex items-center justify-between gap-3 border-b border-border/70 px-6 py-4 sm:px-8">
             <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-              Question {index + 1} of {form.fields.length}
+              Step {stepIndex + 1} of {steps.length}
             </p>
             <div className="flex items-center gap-2">
+              {voice.canSpeak ? (
+                <button
+                  type="button"
+                  onClick={() => void voice.speak(spokenText)}
+                  aria-label={voice.speaking ? "Replay aloud" : "Play aloud"}
+                  title={voice.speaking ? "Reading aloud" : "Play this aloud"}
+                  className="inline-flex h-6 items-center gap-1.5 rounded-full border border-border px-2 font-mono text-[8.5px] uppercase tracking-[0.1em] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                >
+                  {voice.speaking ? (
+                    <AudioLines className="size-3" aria-hidden="true" />
+                  ) : (
+                    <Volume2 className="size-3" aria-hidden="true" />
+                  )}
+                  <span className="hidden sm:inline">
+                    {voice.speaking ? "Reading" : "Play"}
+                  </span>
+                </button>
+              ) : null}
               <span
                 className={cn(
                   "rounded-full px-2.5 py-1 font-mono text-[8.5px] uppercase tracking-[0.12em]",
-                  field.required
+                  step.fields.some((item) => item.required)
                     ? "bg-accent-soft/60 text-accent-strong"
                     : "bg-muted text-muted-foreground",
                 )}
               >
-                {field.required ? "Required" : "Optional"}
+                {step.fields.some((item) => item.required)
+                  ? "Required"
+                  : "Optional"}
               </span>
               <button
                 type="button"
@@ -551,18 +724,34 @@ export function FormRunner({ formId }: { formId: string }) {
                     Saved. Does this look right?
                   </h2>
                   <p className="mt-1.5 text-sm text-muted-foreground">
-                    {confirmation.field.plainQuestion}
+                    {confirmation.title}
                   </p>
                   <div className="mt-4 rounded-2xl border border-border bg-background/60 p-3">
                     <div className="flex items-center justify-between gap-2">
                       <span className="font-mono text-[8.5px] uppercase tracking-[0.14em] text-muted-foreground">
-                        Your answer · paste into the original form
+                        Your {confirmation.values.length === 1 ? "answer" : "answers"} · paste into the original form
                       </span>
-                      <CopyButton value={confirmation.value} />
+                      {confirmation.values.length === 1 ? (
+                        <CopyButton value={confirmation.values[0].value} />
+                      ) : null}
                     </div>
-                    <pre className="mt-2 whitespace-pre-wrap break-words font-mono text-[13px] leading-relaxed text-foreground">
-                      {confirmation.value}
-                    </pre>
+                    <div className="mt-2 space-y-3">
+                      {confirmation.values.map((entry) => (
+                        <div key={entry.field.key}>
+                          {confirmation.values.length > 1 ? (
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-[11px] font-medium text-foreground/80">
+                                {entry.field.label ?? entry.field.plainQuestion}
+                              </span>
+                              <CopyButton value={entry.value} />
+                            </div>
+                          ) : null}
+                          <pre className="mt-1 whitespace-pre-wrap break-words font-mono text-[13px] leading-relaxed text-foreground">
+                            {entry.value}
+                          </pre>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                   <div className="mt-6 flex flex-col gap-2 sm:flex-row">
                     <Button onClick={handleConfirm}>
@@ -574,23 +763,25 @@ export function FormRunner({ formId }: { formId: string }) {
                       onClick={() => setConfirmation(null)}
                     >
                       <Pencil className="size-3.5" aria-hidden="true" />
-                      Edit this answer
+                      {confirmation.values.length === 1
+                        ? "Edit this answer"
+                        : "Keep editing"}
                     </Button>
                   </div>
                 </motion.div>
-              ) : (
+              ) : singleField ? (
                 <motion.div
-                  key={`field-${field.key}`}
+                  key={`step-${step.key}`}
                   initial={{ opacity: 0, y: 12 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ type: "spring", stiffness: 260, damping: 26 }}
                 >
                   <h2 className="font-display text-[1.75rem] font-medium leading-[1.15] tracking-[-0.01em] text-foreground sm:text-[2rem]">
-                    {field.plainQuestion}
+                    {singleField.plainQuestion}
                   </h2>
-                  {field.helpText ? (
+                  {singleField.helpText ? (
                     <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
-                      {field.helpText}
+                      {singleField.helpText}
                     </p>
                   ) : null}
 
@@ -603,54 +794,131 @@ export function FormRunner({ formId }: { formId: string }) {
                       />
                     </summary>
                     <p className="mt-2 font-mono text-[12px] leading-relaxed text-foreground/75">
-                      {field.question}
+                      {singleField.question}
                     </p>
                   </details>
 
                   <div className="mt-5 flex items-start gap-2">
                     <div className="min-w-0 flex-1">
                       <AnswerInput
-                        field={field}
-                        value={draft}
-                        onChange={(value) => {
-                          setDraft(value);
-                          if (fieldError) setFieldError(null);
-                        }}
+                        field={singleField}
+                        value={drafts[singleField.key] ?? ""}
+                        onChange={(value) => updateDraft(singleField.key, value)}
                         disabled={saving}
-                        invalid={Boolean(fieldError)}
-                        errorId={fieldError ? "answer-error" : undefined}
+                        invalid={Boolean(fieldErrors[singleField.key])}
+                        errorId={
+                          fieldErrors[singleField.key]
+                            ? "answer-error"
+                            : undefined
+                        }
                       />
                     </div>
-                    {field.type !== "choice" ? (
+                    {singleField.type !== "choice" ? (
                       <button
                         type="button"
-                        disabled
-                        title="Voice answers arrive in Phase 4"
-                        aria-label="Answer by voice (coming soon)"
-                        className="inline-flex size-12 shrink-0 cursor-not-allowed items-center justify-center rounded-full border border-border bg-muted/60 text-muted-foreground opacity-70"
+                        onClick={() => {
+                          if (voice.recording) {
+                            voice.stopRecording();
+                          } else {
+                            void voice.startRecording();
+                          }
+                        }}
+                        disabled={!voice.canRecord || saving}
+                        title={
+                          !voice.voiceRepliesEnabled
+                            ? "Turn on Voice replies to speak answers"
+                            : !voice.sttAvailable
+                              ? "Speech-to-text isn’t configured"
+                              : voice.transcribing
+                                ? "Transcribing…"
+                                : voice.recording
+                                  ? "Stop recording"
+                                  : "Answer by voice"
+                        }
+                        aria-label={
+                          voice.recording ? "Stop recording" : "Answer by voice"
+                        }
+                        className={cn(
+                          "inline-flex size-12 shrink-0 items-center justify-center rounded-full border transition-[transform,background-color,color,box-shadow] duration-200",
+                          voice.canRecord
+                            ? "border-primary/30 bg-primary text-primary-foreground shadow-soft hover:-translate-y-0.5"
+                            : "cursor-not-allowed border-border bg-muted/60 text-muted-foreground opacity-70",
+                          voice.recording && "bg-danger text-white",
+                        )}
                       >
-                        <Mic className="size-4.5" aria-hidden="true" />
+                        {voice.transcribing ? (
+                          <LoaderCircle
+                            className="size-4 animate-spin"
+                            aria-hidden="true"
+                          />
+                        ) : voice.recording ? (
+                          <Square className="size-4" aria-hidden="true" />
+                        ) : (
+                          <Mic className="size-4.5" aria-hidden="true" />
+                        )}
                       </button>
                     ) : null}
                   </div>
-                  {field.type !== "choice" ? (
-                    <p className="mt-1.5 text-[10.5px] text-muted-foreground">
-                      Voice answers are coming in a later phase.
-                    </p>
-                  ) : null}
 
-                  {fieldError ? (
+                  <div className="mt-1.5 space-y-1">
+                    {!form.answers[singleField.key] &&
+                    form.suggestedAnswers?.[singleField.key] ===
+                      (drafts[singleField.key] ?? "") &&
+                    drafts[singleField.key] ? (
+                      <p className="text-[10.5px] leading-relaxed text-primary">
+                        Prefilled from your saved context. Check it before saving.
+                      </p>
+                    ) : null}
+                    {singleField.type !== "choice" ? (
+                      <p className="text-[10.5px] text-muted-foreground">
+                        {voice.recording
+                          ? "Listening… tap the square to stop."
+                          : voice.transcribing
+                            ? "Transcribing your answer…"
+                            : !voice.ttsAvailable && !voice.sttAvailable
+                              ? "Voice isn’t configured yet. Type your answer."
+                              : !voice.voiceRepliesEnabled
+                                ? "Voice answers are off. Turn on Voice replies in the top bar, or type."
+                                : !voice.sttAvailable
+                                  ? "Spoken answers aren’t configured. Type instead."
+                                  : "Tap the mic to answer by speaking, or type."}
+                      </p>
+                    ) : null}
+                    {voice.voiceNotice ? (
+                      <p
+                        role="status"
+                        className={cn(
+                          "text-[10.5px] leading-relaxed",
+                          voice.voiceNotice.tone === "error"
+                            ? "text-danger"
+                            : "text-muted-foreground",
+                        )}
+                      >
+                        {voice.voiceNotice.message}
+                      </p>
+                    ) : null}
+                    {voice.voiceError ? (
+                      <p
+                        role="alert"
+                        className="text-[10.5px] leading-relaxed text-danger"
+                      >
+                        {voice.voiceError}
+                      </p>
+                    ) : null}
+                  </div>
+
+                  {fieldErrors[singleField.key] ? (
                     <p
                       id="answer-error"
                       role="alert"
                       className="mt-3 rounded-lg border border-danger/25 bg-danger/5 px-3 py-2 text-[12px] leading-relaxed text-danger"
                     >
-                      {fieldError}
+                      {fieldErrors[singleField.key]}
                     </p>
                   ) : null}
 
                   <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:items-center">
-                    {index > 0 && !returnToReview ? (
+                    {stepIndex > 0 && !returnToReview ? (
                       <Button variant="ghost" onClick={previousQuestion} disabled={saving}>
                         <ChevronLeft className="size-3.5" aria-hidden="true" />
                         Previous
@@ -662,7 +930,7 @@ export function FormRunner({ formId }: { formId: string }) {
                         onClick={() => {
                           setReturnToReview(false);
                           setMode("review");
-                          setFieldError(null);
+                          setFieldErrors({});
                         }}
                         disabled={saving}
                       >
@@ -670,7 +938,159 @@ export function FormRunner({ formId }: { formId: string }) {
                       </Button>
                     ) : null}
                     <span className="hidden flex-1 sm:block" />
-                    {!field.required ? (
+                    {!singleField.required ? (
+                      <Button variant="ghost" onClick={handleSkip} disabled={saving}>
+                        Skip for now
+                      </Button>
+                    ) : null}
+                    <Button
+                      onClick={() => void handleSave()}
+                      disabled={saving || voice.recording || voice.transcribing}
+                    >
+                      {saving ? (
+                        <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
+                      ) : null}
+                      Save answer
+                      <ArrowRight className="size-4" aria-hidden="true" />
+                    </Button>
+                  </div>
+                </motion.div>
+              ) : (
+                <motion.div
+                  key={`step-${step.key}`}
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ type: "spring", stiffness: 260, damping: 26 }}
+                >
+                  <h2 className="font-display text-[1.75rem] font-medium leading-[1.15] tracking-[-0.01em] text-foreground sm:text-[2rem]">
+                    {step.title}
+                  </h2>
+                  <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
+                    These details go together. Fill in what applies — required
+                    ones are marked.
+                  </p>
+
+                  <div className="mt-5 space-y-4">
+                    {step.fields.map((item) => {
+                      const value = drafts[item.key] ?? "";
+                      const error = fieldErrors[item.key];
+
+                      return (
+                        <div
+                          key={item.key}
+                          className="rounded-2xl border border-border/70 bg-background/40 p-4"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <label className="text-[13.5px] font-medium text-foreground">
+                              {item.label ?? item.plainQuestion}
+                              {item.required ? (
+                                <span className="ml-1 text-danger" aria-hidden="true">
+                                  *
+                                </span>
+                              ) : null}
+                            </label>
+                            <span className="font-mono text-[8.5px] uppercase tracking-[0.12em] text-muted-foreground">
+                              {item.required ? "Required" : "Optional"}
+                            </span>
+                          </div>
+                          {item.helpText ? (
+                            <p className="mt-1 text-[11.5px] leading-relaxed text-muted-foreground">
+                              {item.helpText}
+                            </p>
+                          ) : null}
+                          <div className="mt-2.5">
+                            <AnswerInput
+                              field={item}
+                              value={value}
+                              onChange={(nextValue) =>
+                                updateDraft(item.key, nextValue)
+                              }
+                              disabled={saving}
+                              invalid={Boolean(error)}
+                              errorId={error ? `error-${item.key}` : undefined}
+                            />
+                          </div>
+                          {!form.answers[item.key] &&
+                          form.suggestedAnswers?.[item.key] === value &&
+                          value ? (
+                            <p className="mt-1.5 text-[10.5px] leading-relaxed text-primary">
+                              Prefilled from your saved context. Check it
+                              before saving.
+                            </p>
+                          ) : null}
+                          {error ? (
+                            <p
+                              id={`error-${item.key}`}
+                              role="alert"
+                              className="mt-2 rounded-lg border border-danger/25 bg-danger/5 px-3 py-2 text-[12px] leading-relaxed text-danger"
+                            >
+                              {error}
+                            </p>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <details className="group mt-4 rounded-xl border border-border/70 bg-background/40 px-3.5 py-2.5">
+                    <summary className="flex cursor-pointer list-none items-center justify-between gap-2 font-mono text-[9.5px] uppercase tracking-[0.14em] text-muted-foreground">
+                      Original form wording
+                      <ChevronDown
+                        className="size-3.5 transition-transform duration-200 group-open:rotate-180"
+                        aria-hidden="true"
+                      />
+                    </summary>
+                    <ul className="mt-2 space-y-1.5">
+                      {step.fields.map((item) => (
+                        <li
+                          key={item.key}
+                          className="font-mono text-[12px] leading-relaxed text-foreground/75"
+                        >
+                          <span className="text-muted-foreground">
+                            {item.label ?? item.plainQuestion}:{" "}
+                          </span>
+                          {item.question}
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+
+                  {voice.voiceNotice ? (
+                    <p
+                      role="status"
+                      className={cn(
+                        "mt-3 text-[10.5px] leading-relaxed",
+                        voice.voiceNotice.tone === "error"
+                          ? "text-danger"
+                          : "text-muted-foreground",
+                      )}
+                    >
+                      {voice.voiceNotice.message}
+                    </p>
+                  ) : null}
+
+                  <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:items-center">
+                    {stepIndex > 0 && !returnToReview ? (
+                      <Button variant="ghost" onClick={previousQuestion} disabled={saving}>
+                        <ChevronLeft className="size-3.5" aria-hidden="true" />
+                        Previous
+                      </Button>
+                    ) : null}
+                    {returnToReview ? (
+                      <Button
+                        variant="ghost"
+                        onClick={() => {
+                          setReturnToReview(false);
+                          setMode("review");
+                          setFieldErrors({});
+                        }}
+                        disabled={saving}
+                      >
+                        Back to review
+                      </Button>
+                    ) : null}
+                    <span className="hidden flex-1 sm:block" />
+                    {!step.fields.some((item) => item.required) ? (
                       <Button variant="ghost" onClick={handleSkip} disabled={saving}>
                         Skip for now
                       </Button>
@@ -679,7 +1099,7 @@ export function FormRunner({ formId }: { formId: string }) {
                       {saving ? (
                         <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
                       ) : null}
-                      Save answer
+                      Save answers
                       <ArrowRight className="size-4" aria-hidden="true" />
                     </Button>
                   </div>

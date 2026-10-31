@@ -25,9 +25,16 @@ async function insertForm(options: {
   sourceLabel: string;
   contentHash: string;
   outcome: ExtractionOutcome;
+  instructions?: string;
 }): Promise<FormSummaryDto> {
   const { userId, sourceType, sourceLabel, contentHash, outcome } = options;
   await connectDb();
+
+  const instructions = options.instructions
+    ?.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 1000);
 
   let fields = outcome.fields;
   let aiEnhanced = false;
@@ -37,6 +44,7 @@ async function insertForm(options: {
       userId,
       title: outcome.title,
       fields: outcome.fields,
+      instructions: instructions || undefined,
     });
     fields = simplified.fields;
     aiEnhanced = simplified.usedAi;
@@ -52,6 +60,7 @@ async function insertForm(options: {
     extractionMode: outcome.mode,
     demoFallback: outcome.demoFallback,
     aiEnhanced,
+    ...(instructions ? { aiInstructions: instructions } : {}),
     ...(outcome.note ? { extractionNote: outcome.note.slice(0, 300) } : {}),
   });
 
@@ -69,6 +78,7 @@ async function insertForm(options: {
 export async function createFormFromUrl(options: {
   userId: string;
   url: string;
+  instructions?: string;
 }): Promise<FormSummaryDto> {
   const page = await fetchFormPage(options.url);
   const cached = extractionCache.get(extractionCacheKey(page.contentHash));
@@ -95,6 +105,7 @@ export async function createFormFromUrl(options: {
     sourceLabel: hostname,
     contentHash: page.contentHash,
     outcome,
+    instructions: options.instructions,
   });
 }
 
@@ -106,6 +117,7 @@ function formatMegabytes(bytes: number): string {
 export async function createFormFromFile(options: {
   userId: string;
   file: File;
+  instructions?: string;
 }): Promise<FormSummaryDto> {
   const { file } = options;
   const maxBytes = env.MAX_UPLOAD_MB * 1024 * 1024;
@@ -166,6 +178,7 @@ export async function createFormFromFile(options: {
       sourceLabel,
       contentHash,
       outcome,
+      instructions: options.instructions,
     });
   } finally {
     scheduleUploadRemoval(fullPath);

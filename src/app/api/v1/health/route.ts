@@ -1,7 +1,7 @@
 import { apiSuccess } from "@/lib/api/response";
 import { withApi } from "@/lib/api/handler";
 import { connectDb } from "@/lib/db/connect";
-import { services } from "@/lib/env";
+import { services, voiceCapabilities } from "@/lib/env";
 
 export const runtime = "nodejs";
 
@@ -21,7 +21,11 @@ export const GET = withApi({ auth: "none" }, async () => {
     time: new Date().toISOString(),
     services: {
       gemma: services.gemma ? "active" : "demo",
-      elevenlabs: services.elevenlabs ? "configured" : "demo",
+      elevenlabs: voiceCapabilities.tts
+        ? "active"
+        : voiceCapabilities.stt
+          ? "configured"
+          : "demo",
       ocr: services.ocr ? "ready" : "demo",
       database: database ? "connected" : "unavailable",
     },

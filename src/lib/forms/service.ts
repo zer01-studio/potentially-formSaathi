@@ -1,6 +1,10 @@
 import "server-only";
 import { Types } from "mongoose";
 import { ApiHttpError } from "@/lib/api/errors";
+import {
+  getPrefillSuggestions,
+  saveContextFromAnswer,
+} from "@/lib/context/service";
 import { connectDb } from "@/lib/db/connect";
 import { Answer } from "@/lib/db/models/answer";
 import { Form } from "@/lib/db/models/form";
@@ -29,7 +33,10 @@ export async function listFormsForUser(
 ): Promise<FormSummaryDto[]> {
   await connectDb();
 
-  const forms = await Form.find({ userId: userObjectId(userId) })
+  const forms = await Form.find({
+    userId: userObjectId(userId),
+    hiddenAt: null,
+  })
     .sort({ createdAt: -1 })
     .limit(Math.min(Math.max(limit, 1), 50))
     .lean();
@@ -67,6 +74,7 @@ export async function getFormDetailForUser(
   const form = await Form.findOne({
     _id: formObjectId(formId),
     userId: userObjectId(userId),
+    hiddenAt: null,
   }).lean();
 
   if (!form) throw formNotFound();
@@ -76,7 +84,16 @@ export async function getFormDetailForUser(
     formId: form._id,
   }).lean();
 
-  return toFormDetail(form as unknown as FormRecordLike, answers);
+  const suggestedAnswers = await getPrefillSuggestions(
+    userId,
+    form.fields as unknown as FormFieldDto[],
+  );
+
+  return toFormDetail(
+    form as unknown as FormRecordLike,
+    answers,
+    suggestedAnswers,
+  );
 }
 
 export async function saveAnswerForUser(options: {
@@ -91,6 +108,7 @@ export async function saveAnswerForUser(options: {
   const form = await Form.findOne({
     _id: formObjectId(options.formId),
     userId: userObjectId(userId),
+    hiddenAt: null,
   }).lean();
 
   if (!form) throw formNotFound();
@@ -131,6 +149,13 @@ export async function saveAnswerForUser(options: {
     { $set: { value: validation.normalizedValue, updatedAt: new Date() } },
     { upsert: true, new: true, setDefaultsOnInsert: true },
   ).lean();
+
+  await saveContextFromAnswer({
+    userId,
+    formId: String(form._id),
+    field,
+    value: validation.normalizedValue,
+  });
 
   return {
     fieldKey,

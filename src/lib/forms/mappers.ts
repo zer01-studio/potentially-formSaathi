@@ -11,11 +11,14 @@ type FormFieldLike = {
   key: string;
   question: string;
   plainQuestion: string;
+  label?: string | null;
   type: string;
   required?: boolean | null;
   helpText?: string | null;
   options?: string[] | null;
   maxLength?: number | null;
+  step?: number | null;
+  stepTitle?: string | null;
 };
 
 export type FormRecordLike = {
@@ -28,6 +31,7 @@ export type FormRecordLike = {
   extractionMode: string;
   demoFallback?: boolean | null;
   aiEnhanced?: boolean | null;
+  aiInstructions?: string | null;
   extractionNote?: string | null;
 };
 
@@ -41,6 +45,7 @@ function toFields(fields: FormFieldLike[]): FormFieldDto[] {
     key: field.key,
     question: field.question,
     plainQuestion: field.plainQuestion,
+    ...(field.label ? { label: field.label } : {}),
     type: field.type as FieldType,
     required: Boolean(field.required),
     ...(field.helpText ? { helpText: field.helpText } : {}),
@@ -48,6 +53,8 @@ function toFields(fields: FormFieldLike[]): FormFieldDto[] {
       ? { options: [...field.options] }
       : {}),
     ...(typeof field.maxLength === "number" ? { maxLength: field.maxLength } : {}),
+    ...(typeof field.step === "number" ? { step: field.step } : {}),
+    ...(field.stepTitle ? { stepTitle: field.stepTitle } : {}),
   }));
 }
 
@@ -72,6 +79,7 @@ export function toFormSummary(
 export function toFormDetail(
   form: FormRecordLike,
   answers: AnswerLike[],
+  suggestedAnswers: Record<string, string> = {},
 ): FormDetailDto {
   const fields = toFields(form.fields);
   const knownKeys = new Set(fields.map((field) => field.key));
@@ -84,10 +92,22 @@ export function toFormDetail(
     answeredCount += 1;
   }
 
+  const suggestions: Record<string, string> = {};
+  for (const field of fields) {
+    const value = suggestedAnswers[field.key];
+    if (value && !answerMap[field.key]) {
+      suggestions[field.key] = value;
+    }
+  }
+
   return {
     ...toFormSummary(form, answeredCount),
     fields,
     answers: answerMap,
+    ...(Object.keys(suggestions).length > 0
+      ? { suggestedAnswers: suggestions }
+      : {}),
+    ...(form.aiInstructions ? { aiInstructions: form.aiInstructions } : {}),
     ...(form.extractionNote ? { extractionNote: form.extractionNote } : {}),
   };
 }

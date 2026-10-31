@@ -20,11 +20,14 @@ export type FormFieldDto = {
   key: string;
   question: string;
   plainQuestion: string;
+  label?: string;
   type: FieldType;
   required: boolean;
   helpText?: string;
   options?: string[];
   maxLength?: number;
+  step?: number;
+  stepTitle?: string;
 };
 
 export type FormSummaryDto = {
@@ -43,6 +46,8 @@ export type FormSummaryDto = {
 export type FormDetailDto = FormSummaryDto & {
   fields: FormFieldDto[];
   answers: Record<string, string>;
+  suggestedAnswers?: Record<string, string>;
+  aiInstructions?: string;
   extractionNote?: string;
 };
 

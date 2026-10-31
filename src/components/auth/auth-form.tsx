@@ -114,7 +114,6 @@ export function AuthForm({
         <Field label="Email" htmlFor="email" error={fieldErrors.email}>
           <Input
             id="email"
-            name="email"
             type="email"
             inputMode="email"
             autoComplete="email"
@@ -137,7 +136,6 @@ export function AuthForm({
           <div className="relative">
             <Input
               id="password"
-              name="password"
               type={showPassword ? "text" : "password"}
               autoComplete={isSignup ? "new-password" : "current-password"}
               placeholder="••••••••"

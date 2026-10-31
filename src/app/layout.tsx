@@ -45,6 +45,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body
         className={`${inter.variable} ${fraunces.variable} ${jetbrains.variable} min-h-dvh font-sans antialiased`}
       >
+        <noscript>
+          <div className="border-b border-warning/40 bg-warning/15 px-4 py-2 text-center text-sm font-medium text-foreground">
+            FormSaathi needs JavaScript to sign in securely. Enable JavaScript
+            and reload this page.
+          </div>
+        </noscript>
         <ThemeProvider>
           <MotionProvider>
             <a

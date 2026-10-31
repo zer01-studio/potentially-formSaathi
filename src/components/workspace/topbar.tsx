@@ -6,6 +6,7 @@ import { LoaderCircle, LogOut } from "lucide-react";
 import { Logo } from "@/components/site/logo";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
+import { VoiceToggle } from "@/components/voice/voice-toggle";
 import { apiRequest } from "@/lib/client/api";
 
 export function WorkspaceTopbar({ email }: { email: string }) {
@@ -37,6 +38,7 @@ export function WorkspaceTopbar({ email }: { email: string }) {
           <span className="hidden max-w-[220px] truncate text-sm text-muted-foreground sm:block">
             {email}
           </span>
+          <VoiceToggle />
           <ThemeToggle />
           <Button
             variant="secondary"

@@ -55,3 +55,9 @@ next-env.d.ts
 # test output
 /coverage
 /test-results
+
+# AI knowledge graph (generated, reproducible — run `python -m graphify update .`)
+/graphify-out/
+
+# Antigravity agent config (local dev tooling, not project source)
+/.agents/

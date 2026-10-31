@@ -11,6 +11,8 @@ const userSchema = new Schema(
       maxlength: 254,
     },
     passwordHash: { type: String, required: true, select: false },
+    voiceRepliesEnabled: { type: Boolean, default: false },
+    contextSavingEnabled: { type: Boolean, default: true },
     createdAt: { type: Date, default: () => new Date() },
   },
   { collection: "users", versionKey: false },

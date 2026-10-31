@@ -10,12 +10,11 @@ Built for students, people with low digital literacy, and anyone facing a
 language barrier — with a **demo mode** that keeps the core flow working when
 external AI or voice services are unavailable.
 
-> **Status: Phase 3 of 6 complete.** Gemma now rewrites extracted questions in
-> plain language and adds validation hints, with a 24-hour per-question cache,
-> zod-validated output, one retry, a per-user daily budget, and rule-based
-> fallback. The UI shows an “AI simplified” badge. Voice (Phase 4), templates/
-> context and API tokens (Phase 5), and the test suite (Phase 6) are next. See
-> [Roadmap](#roadmap).
+> **Status: Phase 5 of 6 complete.** Voice replies (ElevenLabs TTS/STT with a
+> greyed-out disabled state when no key is configured), optional AI notes,
+> Templates placeholder, Context Explorer, answer memory/prefill, API tokens,
+> and the scoped autofill-profile endpoint are implemented. The Vitest suite and
+> final security review are Phase 6. See [Roadmap](#roadmap).
 
 ---
 
@@ -63,21 +62,30 @@ Gemma models are served through the **Gemini API**.
   badge when any question was rewritten by Gemma or served from its cache.
 - Logs record counts, cache hits/misses, and error codes only — never question
   text, answers, prompts, or model output.
-- Question rewrites and validation hints are wired now. Mapping free-form voice
-  answers and short conversational replies will be added with the voice work in
-  Phase 4 to avoid an extra AI call on every typed answer.
+- Question rewrites and validation hints are wired now. After transcription, a
+  voice answer is placed in the current question as editable text, so the user
+  can correct it before saving. Free-form conversational answers are not mapped
+  automatically.
 
 ### ElevenLabs
 
 - Text-to-speech: `POST https://api.elevenlabs.io/v1/text-to-speech/{voice_id}`
-- Headers: `xi-api-key: <ELEVENLABS_API_KEY>`, `Content-Type: application/json`
-- Body: `{ "text": "...", "model_id": "eleven_multilingual_v2" }` — responds
-  with audio (default `mp3_44100_128`)
+- Speech-to-text: `POST https://api.elevenlabs.io/v1/speech-to-text`,
+  multipart with `file` and `model_id: "scribe_v2"` (verified).
+- TTS headers: `xi-api-key: <ELEVENLABS_API_KEY>`, `Content-Type: application/json`
+- TTS body: `{ "text": "...", "model_id": "eleven_multilingual_v2" }` — responds
+  with audio (default `mp3_44100_128`).
 - The docs do not prescribe a default voice. **Rachel** (`21m00Tcm4TlvDq8ikWAM`)
   is the long-standing documented example voice and a good default; the voice is
   always taken from `ELEVENLABS_VOICE_ID`. Confirm the ID against your account
   with `GET https://api.elevenlabs.io/v1/voices` once a key exists.
-- Docs: <https://elevenlabs.io/docs/api-reference/text-to-speech/convert>
+- Docs: <https://elevenlabs.io/docs/api-reference/text-to-speech/convert>,
+  <https://elevenlabs.io/docs/api-reference/speech-to-text/convert>
+- **Live audio was not exercised in this environment because no ElevenLabs key
+  is configured.** The UI keeps the voice toggle visible but disabled/greyed, the
+  API returns a plain-language 503 fallback, and text remains fully usable. TTS
+  audio is cached in memory by text + voice + model; STT recordings are processed
+  in memory and never stored.
 
 ### Mongoose + Next.js compatibility
 
@@ -104,7 +112,8 @@ after the PDF text layer comes back empty.
 ```
 ┌───────────────────────────────────────────────────────────────────────┐
 │ Browser — React 19 + Next.js App Router · Tailwind v4 · Motion        │
-│ Landing · Sign in/up · Workspace placeholder · light/dark theme       │
+│ Landing · Sign in/up · Workspace (forms · templates · context)        │
+│ light/dark theme · optional voice mode                                │
 └──────────────────────────────┬────────────────────────────────────────┘
                                │ fetch /api/v1/* (same-origin)
                                │ cookie session + X-CSRF-Token header
@@ -122,12 +131,15 @@ after the PDF text layer comes back empty.
 │  Extraction (live): SSRF-guarded HTML · pdfjs text layer ·            │
 │  pdf-to-img rendering · local Tesseract.js OCR · SHA-256 LRU cache    │
 │                                                                       │
-│  Rules engine: plain-language rewrites · answer validation ·          │
-│  demo samples — replaced/augmented by Gemma in Phase 3                │
+│  Gemma (optional): plain-language rewrites · validation hints ·       │
+│  AI notes · cache · daily budget · rule-based fallback                │
 │                                                                       │
-│  Voice (Phase 4): ElevenLabs with text-only fallback                  │
+│  Context: safe answer memory · prefill · scoped autofill profile      │
+│  API tokens: hashed · scopes · expiry · revocation · audit            │
 │                                                                       │
-│  Cache interface (live for extraction): in-memory LRU (Redis later)   │
+│  Voice (optional): ElevenLabs TTS/STT · greyed out without a key      │
+│                                                                       │
+│  Cache interface (live for extraction/AI): in-memory LRU (Redis later)│
 └──────────────────────────────┬────────────────────────────────────────┘
                                │ Mongoose (cached connection)
                                ▼
@@ -146,9 +158,10 @@ preflights · keeps disallowed cross-origin callers out.
 - **Web app:** opaque session token in an `httpOnly`, `SameSite=Lax`, `Secure`
   (in production) cookie; only a SHA-256 hash is stored in `sessions`, which has
   a TTL index on `expiresAt`.
-- **API clients (future extension):** `Authorization: Bearer …` tokens stored
-  hashed in `apiTokens` with `scopes`, `expiresAt`, `lastUsedAt`, `revokedAt`.
-  Token requests skip CSRF; cookie requests must send `X-CSRF-Token`.
+- **API clients / browser extension:** `Authorization: Bearer fs_…` tokens
+  (SHA-256 hashed at rest) with `scopes`, `expiresAt` (90 days), `lastUsedAt`,
+  and `revokedAt`. Token requests skip CSRF; cookie requests must send
+  `X-CSRF-Token`. The raw token is shown once at issue time.
 - **Passwords:** bcrypt (bcryptjs) with 12 rounds. No plaintext anywhere.
 
 ---
@@ -210,6 +223,19 @@ npm run dev
 Open <http://localhost:3000>, create a mock account, and you will land in
 `/workspace`.
 
+#### Testing from another device on your network
+
+`next dev` only accepts cross-origin dev assets from explicitly allowed hosts.
+`next.config.ts` adds `localhost`, `127.0.0.1`, and every IPv4 address of the
+machine to `allowedDevOrigins`, so `http://<your-lan-ip>:3000` works without
+extra configuration. To use a fixed public IP or hostname, add it to
+`allowedDevOrigins` in `next.config.ts`.
+
+Two production notes: cookies are `Secure` when `NODE_ENV=production`, so serve
+the app over **HTTPS** outside localhost; and the API derives its origin from the
+`Host` / `X-Forwarded-Host` headers, so a reverse proxy must forward them
+unchanged.
+
 ### 4. Quality checks
 
 ```bash
@@ -270,16 +296,33 @@ FormSaathi is designed so that **the core flow always works**:
   original PDF.
 - The workspace shows a **visible banner naming the unavailable services** (see
   `src/components/workspace/demo-banner.tsx`).
+- If ElevenLabs isn’t configured, the **Voice replies** toggle and the form’s
+  play/mic controls stay visible but greyed out; no voice calls are attempted.
+  If a key exists, the toggle is saved per user and questions/confirmations can be
+  read aloud and answers recorded.
 - `AI_ENABLED=false` is a hard kill switch: all AI calls are skipped.
 
-Health status wording is deliberate: `active` means the Gemma integration is
-enabled for question rewriting (credentials present), `ready` means the local
-OCR engine is enabled, `connected` is used only for the database (which is
-probed), and `demo` means the fallback is active.
+Health status wording is deliberate: `active` means the integration is enabled
+(credentials present), `ready` means the local OCR engine is enabled,
+`connected` is used only for the database (which is probed), and `demo` means the
+fallback is active. The health endpoint reports the same status at
+`GET /api/v1/health`.
 
-Phase 2 turns the extraction fallbacks on; Phase 3 adds Gemma question
-simplification, and Phase 4 adds voice with its own fallback. The health endpoint
-reports the same status: `GET /api/v1/health`.
+### Answer memory and context
+
+- Each form can carry optional **notes for the assistant** at creation (max
+  1,000 characters). They are stored with the form, shown on the form page, and
+  passed to Gemma as untrusted context to reduce misunderstandings.
+- **Context saving** is on by default in this preview and can be switched off in
+  the Context Explorer. Only recognisable, low-risk details are saved from
+  answers (name, email, phone, address, city/state/PIN/country, birth date,
+  company, website). Free-text answers are never auto-saved.
+- Saved details prefill matching questions in later forms; a “Prefilled from your
+  saved context” hint asks the user to check before saving.
+- Items are private to FormSaathi unless marked **Share for autofill**. Only
+  items with an `autofillKey` appear in the extension’s autofill-profile endpoint.
+- API tokens can be issued/revoked from the Context Explorer, and the scoped
+  autofill profile is audited without logging field values.
 
 ### How extraction works today
 
@@ -348,16 +391,30 @@ Live now:
 | POST | `/api/v1/auth/login` | public | Email + password; sets session cookie. Rate-limited per IP. |
 | POST | `/api/v1/auth/logout` | session/token | Deletes the session; CSRF required for cookie sessions. |
 | GET | `/api/v1/auth/session` | optional | Returns the current user or `null`. |
-| POST | `/api/v1/forms/from-url` | session | Reads a public web form into fields. Rate-limited per IP and user. |
-| POST | `/api/v1/forms/from-file` | session | Multipart PDF/image upload; magic-byte, size, and page checks. Rate-limited per IP and user. |
+| POST | `/api/v1/forms/from-url` | session | Reads a public web form into fields; accepts optional `instructions` for the assistant. Rate-limited per IP and user. |
+| POST | `/api/v1/forms/from-file` | session | Multipart PDF/image upload with optional `instructions`; magic-byte, size, and page checks. Rate-limited per IP and user. |
 | GET | `/api/v1/forms` | session or `forms:read` token | Lists the user’s forms with answer progress. |
-| GET | `/api/v1/forms/{id}` | session or `forms:read` token | Form detail: fields, answers, extraction mode, demo note. |
-| PATCH | `/api/v1/forms/{id}/answers/{fieldKey}` | session | Saves and validates one answer. CSRF required. |
+| GET | `/api/v1/forms/{id}` | session or `forms:read` token | Form detail: fields, answers, AI notes, prefilled suggestions, extraction mode, demo note. |
+| PATCH | `/api/v1/forms/{id}/answers/{fieldKey}` | session | Saves and validates one answer; feeds safe details into context. CSRF required. |
 | GET | `/api/v1/forms/{id}/export` | session or `forms:read` token | Validates all answers and downloads the structured JSON file. |
+| GET | `/api/v1/preferences` | session or token | Voice and context preferences plus voice availability. |
+| PATCH | `/api/v1/preferences` | session | Updates `voiceRepliesEnabled` and/or `contextSavingEnabled`. |
+| GET | `/api/v1/context/items` | session or `context:read` token | Saved context items and the saving preference. |
+| POST | `/api/v1/context/items` | session or `context:write` token | Add a saved detail. |
+| PATCH | `/api/v1/context/items/{id}` | session or `context:write` token | Edit a saved detail, including its `autofillKey`. |
+| DELETE | `/api/v1/context/items/{id}` | session or `context:write` token | Delete one detail. |
+| DELETE | `/api/v1/context/items` | session or `context:write` token | Clear all details. |
+| GET | `/api/v1/context/autofill-profile` | `autofill:read` token or session | Flat map of shared details only; per-token rate limit and audit. |
+| GET | `/api/v1/tokens` | session | List issued API tokens (metadata only). |
+| POST | `/api/v1/tokens` | session | Issue a token; raw value shown once. |
+| DELETE | `/api/v1/tokens/{id}` | session | Revoke a token. |
+| POST | `/api/v1/voice/speak` | session | ElevenLabs TTS with cache; 503 when unconfigured. |
+| POST | `/api/v1/voice/transcribe` | session | ElevenLabs STT (scribe_v2); 503 when unconfigured. |
 
-Token access is read-only for forms (mutations require a web session); context,
-autofill, and token management arrive in Phase 5. See
-`docs/extension-api.md` for the full contract.
+Bearer tokens are read-only for forms: they can list, read, and export, but
+cannot create forms or change answers. Creating and revoking tokens requires a
+web session. Context items, the autofill profile, and voice endpoints are live;
+`docs/extension-api.md` is the full contract for API clients.
 
 **CORS/CSRF rules**
 
@@ -403,8 +460,18 @@ autofill, and token management arrive in Phase 5. See
 - **AI budget/rate limits:** daily AI usage is in-memory per user and per process;
   use shared storage if you run multiple instances. AI runs only through the
   attach endpoints that already have per-IP/per-user limits.
+- **Voice:** ElevenLabs calls are made only when both `ELEVENLABS_API_KEY` and
+  `ELEVENLABS_VOICE_ID` are set. Without them the voice toggle, play buttons,
+  and mic are rendered disabled; the API returns a plain 503 and the UI falls
+  back to typing. ElevenLabs request bodies are not logged and recordings are
+  processed in memory only.
+- **Tokens and autofill:** tokens are stored as SHA-256 hashes and shown once at
+  creation; scope checks happen before data access. The autofill profile returns
+  only items explicitly marked shareable, and reads are audited with counts and
+  metadata only — never field values.
 - **Not yet built:** real OAuth, browser extension, PDF output, template
-  sharing, voice. Mock auth is intentional for now.
+  sharing. The voice integration is implemented but has not been exercised
+  against the live ElevenLabs API in this environment (no key configured).
 
 ---
 
@@ -425,9 +492,9 @@ autofill route). `npm test` will run the full suite once added.
 | 1 | Setup, docs, design, mock auth, MongoDB, API skeleton, CORS | **Done** |
 | 2 | Attach · validation · extraction · stepper · review · JSON export | **Done** |
 | 3 | Gemma integration with cache, zod validation, budget, rule fallback | **Done** |
-| 4 | Voice toggle · ElevenLabs with fallback · motion polish | Next |
-| 5 | Templates placeholder · Context Explorer · API tokens · autofillKey | Planned |
-| 6 | Tests · security review · extension API docs · final README | Planned |
+| 4 | Voice toggle · ElevenLabs TTS/STT · greyed fallback · motion polish | **Done** |
+| 5 | Templates placeholder · Context Explorer · answer memory/prefill · API tokens · autofillKey | **Done** |
+| 6 | Tests · security review · extension API docs · final README | Next |
 
 Further out: Google OAuth, template sharing, PDF output, Redis cache, browser
 extension.

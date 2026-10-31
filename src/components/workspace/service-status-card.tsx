@@ -114,7 +114,7 @@ export function ServiceStatusCard() {
 
       <p className="mt-3 text-[10px] leading-relaxed text-muted-foreground">
         Gemma is used for plain-language rewrites and hints when configured; OCR
-        runs locally; voice arrives in Phase 4.
+        runs locally; voice replies are active when ElevenLabs is configured.
       </p>
     </section>
   );

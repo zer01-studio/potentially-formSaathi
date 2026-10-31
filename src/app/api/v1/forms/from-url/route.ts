@@ -28,7 +28,11 @@ export const POST = withApi(
     requireSessionAuth(auth);
 
     const body = parseWithSchema(attachUrlSchema, await readJsonBody(request));
-    const form = await createFormFromUrl({ userId: auth.userId, url: body.url });
+    const form = await createFormFromUrl({
+      userId: auth.userId,
+      url: body.url,
+      instructions: body.instructions,
+    });
 
     return apiSuccess({ form }, { status: 201 });
   },

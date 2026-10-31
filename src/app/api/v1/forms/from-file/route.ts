@@ -1,9 +1,11 @@
 import { ApiHttpError } from "@/lib/api/errors";
 import { withApi } from "@/lib/api/handler";
 import { requireSessionAuth } from "@/lib/api/guards";
+import { parseWithSchema } from "@/lib/api/json";
 import { apiSuccess } from "@/lib/api/response";
 import { env } from "@/lib/env";
 import { createFormFromFile } from "@/lib/forms/attachments";
+import { instructionsSchema } from "@/lib/validation/forms";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -61,7 +63,17 @@ export const POST = withApi(
       throw new ApiHttpError(400, "file_required", "Choose a PDF or photo first.");
     }
 
-    const form = await createFormFromFile({ userId: auth.userId, file });
+    const rawInstructions = formData.get("instructions");
+    const instructions = parseWithSchema(
+      instructionsSchema,
+      typeof rawInstructions === "string" ? rawInstructions : undefined,
+    );
+
+    const form = await createFormFromFile({
+      userId: auth.userId,
+      file,
+      instructions,
+    });
 
     return apiSuccess({ form }, { status: 201 });
   },

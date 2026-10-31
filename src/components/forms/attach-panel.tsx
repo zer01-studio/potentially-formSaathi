@@ -45,6 +45,7 @@ export function AttachPanel({
   const [tab, setTab] = useState<AttachTab>("link");
   const [url, setUrl] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  const [instructions, setInstructions] = useState("");
   const [dragActive, setDragActive] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -168,7 +169,10 @@ export function AttachPanel({
     try {
       const data = await apiRequest<{ form: FormSummaryDto }>("/api/v1/forms/from-url", {
         method: "POST",
-        body: { url: url.trim() },
+        body: {
+          url: url.trim(),
+          ...(instructions.trim() ? { instructions: instructions.trim() } : {}),
+        },
       });
       await goToForm(data.form);
     } catch (err) {
@@ -196,6 +200,9 @@ export function AttachPanel({
     try {
       const formData = new FormData();
       formData.append("file", file);
+      if (instructions.trim()) {
+        formData.append("instructions", instructions.trim());
+      }
       const data = await apiRequest<{ form: FormSummaryDto }>("/api/v1/forms/from-file", {
         method: "POST",
         formData,
@@ -427,6 +434,34 @@ export function AttachPanel({
           {error}
         </div>
       ) : null}
+
+      <div className="mt-5 rounded-2xl border border-border/70 bg-background/40 p-3.5">
+        <label
+          htmlFor="ai-instructions"
+          className="text-[12px] font-medium text-foreground"
+        >
+          Anything the assistant should know about this form?{" "}
+          <span className="font-normal text-muted-foreground">(optional)</span>
+        </label>
+        <p className="mt-0.5 text-[10.5px] leading-relaxed text-muted-foreground">
+          Useful context before it reads the form, like “This is a student visa
+          application” or “My surname is written first.” Notes are treated as
+          untrusted context, never as instructions to the system.
+        </p>
+        <textarea
+          id="ai-instructions"
+          value={instructions}
+          onChange={(event) => setInstructions(event.target.value)}
+          disabled={pending}
+          maxLength={1000}
+          rows={2}
+          placeholder="Add notes for the assistant…"
+          className="mt-2 w-full resize-y rounded-xl border border-border bg-background/70 px-3 py-2 text-[13px] leading-relaxed text-foreground outline-none transition-[border-color,box-shadow] placeholder:text-muted-foreground/70 focus:border-ring focus:ring-2 focus:ring-ring/20"
+        />
+        <p className="mt-1 text-right font-mono text-[8.5px] text-muted-foreground">
+          {instructions.length}/1000
+        </p>
+      </div>
 
       {pending ? (
         <p className="mt-3 text-[11px] text-muted-foreground">

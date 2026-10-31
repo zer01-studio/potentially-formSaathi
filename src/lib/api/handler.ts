@@ -5,7 +5,7 @@ import { resolveApiAuth, type ApiAuth } from "@/lib/auth/api-auth";
 import type { Scope } from "@/lib/auth/scopes";
 import { AuthError } from "@/lib/auth/types";
 import { DatabaseUnavailableError } from "@/lib/db/connect";
-import { corsHeaders, isOriginAllowed } from "@/lib/security/cors";
+import { corsHeaders, getRequestOrigin, isOriginAllowed } from "@/lib/security/cors";
 import { CSRF_COOKIE, CSRF_HEADER } from "@/lib/security/constants";
 import { verifyCsrfToken } from "@/lib/security/csrf";
 import { getClientIp, hashForRateLimit } from "@/lib/security/ip";
@@ -19,6 +19,7 @@ export type ApiOptions = {
   scopes?: Scope[];
   rateLimit?: { limit: number; windowMs: number; namespace: string };
   userRateLimit?: { limit: number; windowMs: number; namespace: string };
+  tokenRateLimit?: { limit: number; windowMs: number; namespace: string };
 };
 
 export type ApiContext = {
@@ -58,7 +59,7 @@ export function withApi(options: ApiOptions, handler: ApiRouteHandler) {
     const params = await resolveRouteParams(context);
     const start = Date.now();
     const origin = request.headers.get("origin");
-    const selfOrigin = request.nextUrl.origin;
+    const selfOrigin = getRequestOrigin(request);
     let authKind = "none";
 
     try {
@@ -92,6 +93,19 @@ export function withApi(options: ApiOptions, handler: ApiRouteHandler) {
           key,
           options.userRateLimit.limit,
           options.userRateLimit.windowMs,
+        );
+
+        if (!result.allowed) {
+          return rateLimited(request, origin, selfOrigin, authKind, start, result.retryAfterSeconds);
+        }
+      }
+
+      if (options.tokenRateLimit && auth?.kind === "token") {
+        const key = `${options.tokenRateLimit.namespace}:token:${hashForRateLimit(auth.tokenId)}`;
+        const result = rateLimiter.consume(
+          key,
+          options.tokenRateLimit.limit,
+          options.tokenRateLimit.windowMs,
         );
 
         if (!result.allowed) {

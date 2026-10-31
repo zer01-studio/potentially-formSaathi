@@ -10,8 +10,15 @@ const httpUrlSchema = z.preprocess(
     }),
 );
 
+export const instructionsSchema = z
+  .string()
+  .trim()
+  .max(1000, { message: "Keep the notes under 1,000 characters." })
+  .optional();
+
 export const attachUrlSchema = z.strictObject({
   url: httpUrlSchema,
+  instructions: instructionsSchema,
 });
 
 export const answerSchema = z.strictObject({

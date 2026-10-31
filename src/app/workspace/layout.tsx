@@ -1,6 +1,9 @@
 import { redirect } from "next/navigation";
 import { DemoBanner } from "@/components/workspace/demo-banner";
+import { WorkspaceNav } from "@/components/workspace/workspace-nav";
 import { WorkspaceTopbar } from "@/components/workspace/topbar";
+import { VoiceFallbackNotice } from "@/components/voice/voice-fallback-notice";
+import { VoicePreferencesProvider } from "@/components/voice/voice-preferences-provider";
 import { getCurrentUser } from "@/lib/auth/session";
 
 export default async function WorkspaceLayout({
@@ -13,9 +16,13 @@ export default async function WorkspaceLayout({
 
   return (
     <div className="min-h-dvh bg-background">
-      <WorkspaceTopbar email={user.email} />
-      <DemoBanner />
-      <main id="main">{children}</main>
+      <VoicePreferencesProvider>
+        <WorkspaceTopbar email={user.email} />
+        <VoiceFallbackNotice />
+        <DemoBanner />
+        <WorkspaceNav />
+        <main id="main">{children}</main>
+      </VoicePreferencesProvider>
     </div>
   );
 }
