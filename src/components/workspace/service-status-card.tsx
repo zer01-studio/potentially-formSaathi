@@ -5,6 +5,7 @@ import { Activity, LoaderCircle } from "lucide-react";
 import { apiRequest } from "@/lib/client/api";
 
 type ServiceState =
+  | "active"
   | "configured"
   | "demo"
   | "ready"
@@ -31,6 +32,8 @@ const LABELS: { key: keyof HealthResponse["services"]; label: string }[] = [
 
 function statusTone(status: ServiceState): { dot: string; text: string } {
   switch (status) {
+    case "active":
+      return { dot: "bg-success", text: "Active" };
     case "connected":
       return { dot: "bg-success", text: "Connected" };
     case "ready":
@@ -110,8 +113,8 @@ export function ServiceStatusCard() {
       ) : null}
 
       <p className="mt-3 text-[10px] leading-relaxed text-muted-foreground">
-        “Configured” only means credentials are present. OCR runs locally now;
-        Gemma and voice integrations arrive in Phases 3–4.
+        Gemma is used for plain-language rewrites and hints when configured; OCR
+        runs locally; voice arrives in Phase 4.
       </p>
     </section>
   );

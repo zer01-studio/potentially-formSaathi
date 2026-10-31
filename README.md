@@ -10,10 +10,11 @@ Built for students, people with low digital literacy, and anyone facing a
 language barrier — with a **demo mode** that keeps the core flow working when
 external AI or voice services are unavailable.
 
-> **Status: Phase 2 of 6 complete.** The workspace now supports links, PDFs,
-> and photos; extraction, per-answer validation, guided questions, review, and
-> JSON export are live. Gemma (Phase 3), voice (Phase 4), templates/context and
-> API tokens (Phase 5), and the test suite (Phase 6) are next. See
+> **Status: Phase 3 of 6 complete.** Gemma now rewrites extracted questions in
+> plain language and adds validation hints, with a 24-hour per-question cache,
+> zod-validated output, one retry, a per-user daily budget, and rule-based
+> fallback. The UI shows an “AI simplified” badge. Voice (Phase 4), templates/
+> context and API tokens (Phase 5), and the test suite (Phase 6) are next. See
 > [Roadmap](#roadmap).
 
 ---
@@ -40,12 +41,31 @@ Gemma models are served through the **Gemini API**.
   ```
 
 - The model to use always comes from `GEMMA_MODEL`; if it (or the key) is empty,
-  FormSaathi runs that step in demo mode.
+  or `AI_ENABLED=false`, the step uses the rule-based demo engine.
 - Docs: <https://ai.google.dev/gemma/docs/core/gemma_on_gemini_api>,
   <https://ai.google.dev/api/generate-content>
 
-Phase 3 adds structured JSON output validation with a zod schema, retries once,
-then falls back to the rule-based demo engine.
+**Phase 3 implementation (live):**
+
+- Requests use `generationConfig.thinkingConfig.thinkingLevel = "minimal"`, the
+  documented fast mode for Gemma 4 (the 26B variant can otherwise take longer than
+  the request timeout). The 20s timeout was replaced with 60s.
+- The rewrite + validation-hint prompt wraps form text in explicit delimiters and
+  instructs the model to treat it as untrusted data.
+- Output is parsed as JSON and validated with zod. If it does not match, FormSaathi
+  retries once; any remaining failure falls back to the deterministic rules.
+  Transient Gemma `5xx` responses are retried once as well.
+- Results are cached by normalized question text + model + prompt version
+  (`simplify-v1`) for 24 hours, so repeat forms avoid new AI calls.
+- `DAILY_AI_BUDGET_PER_USER` is enforced in memory before AI work; on exhaustion
+  or any failure the form is still created with rule-based questions.
+- Forms store an `aiEnhanced` flag and the form header shows an “AI simplified”
+  badge when any question was rewritten by Gemma or served from its cache.
+- Logs record counts, cache hits/misses, and error codes only — never question
+  text, answers, prompts, or model output.
+- Question rewrites and validation hints are wired now. Mapping free-form voice
+  answers and short conversational replies will be added with the voice work in
+  Phase 4 to avoid an extra AI call on every typed answer.
 
 ### ElevenLabs
 
@@ -213,8 +233,8 @@ npm run build
 | `AUTH_MODE` | No | `mock` | Only `mock` is supported now. Google OAuth is a stub. |
 | `SESSION_SECRET` | No | — | Reserved for session-related signing; opaque session tokens are hashed today. |
 | `AI_ENABLED` | No | `true` | Kill switch. `false` → every AI step uses demo mode. |
-| `RATE_LIMIT_PER_MINUTE` | No | `20` | Sliding-window limit for form upload/attach endpoints (and AI endpoints from Phase 3). |
-| `DAILY_AI_BUDGET_PER_USER` | No | `100` | Per-user daily AI call budget (Phase 3). |
+| `RATE_LIMIT_PER_MINUTE` | No | `20` | Sliding-window limit for form upload/attach endpoints (which may call AI). |
+| `DAILY_AI_BUDGET_PER_USER` | No | `100` | Per-user daily AI operation budget; exhaustion falls back to rules for the rest of the day. |
 | `MAX_UPLOAD_MB` | No | `10` | Upload size limit. |
 | `MAX_PDF_PAGES` | No | `20` | PDF page limit. |
 | `CACHE_DRIVER` | No | `memory` | Only `memory` today; Redis deliberately not added. |
@@ -241,19 +261,21 @@ FormSaathi is designed so that **the core flow always works**:
 - When a service is unavailable, that step switches to a local fallback:
   rule-based question simplification and validation, bundled sample forms, and
   text-only replies.
-- If local OCR is disabled or fails, image/scanned-PDF uploads still create a
-  form using a bundled sample, with a clear on-screen note; the stepper, checks,
-  review, and JSON export stay usable. When OCR runs but finds no recognizable
-  form questions (for example, a screenshot of a login screen), the note says so
-  explicitly and the sample form is marked “Sample form”.
+- If local OCR is disabled or the OCR engine fails, image/scanned-PDF uploads
+  still create a form using a bundled sample, with a clear on-screen note; the
+  stepper, checks, review, and JSON export stay usable.
+- If OCR **succeeds but finds no recognizable form questions** (for example, a
+  screenshot of a login screen), the upload is now rejected with a plain-language
+  error instead of silently creating a sample form. Try a clearer crop or the
+  original PDF.
 - The workspace shows a **visible banner naming the unavailable services** (see
   `src/components/workspace/demo-banner.tsx`).
 - `AI_ENABLED=false` is a hard kill switch: all AI calls are skipped.
 
-Health status wording is deliberate: `configured` means credentials are present
-but the integration is not active yet, `ready` means the local OCR engine is
-enabled, `connected` is used only for the database (which is probed), and `demo`
-means the fallback is active.
+Health status wording is deliberate: `active` means the Gemma integration is
+enabled for question rewriting (credentials present), `ready` means the local
+OCR engine is enabled, `connected` is used only for the database (which is
+probed), and `demo` means the fallback is active.
 
 Phase 2 turns the extraction fallbacks on; Phase 3 adds Gemma question
 simplification, and Phase 4 adds voice with its own fallback. The health endpoint
@@ -270,9 +292,9 @@ reports the same status: `GET /api/v1/health`.
   processing. If a PDF has no meaningful text, pages are rendered (pdf-to-img +
   `@napi-rs/canvas`) and OCR’d locally with Tesseract.js.
 - **Image:** local Tesseract.js OCR.
-- **Simplification:** rule-based for now (dictionary + common-question mappings +
-  type/required heuristics). Phase 3 replaces this step with Gemma under a
-  cache and zod validation.
+- **Simplification:** Gemma rewrites questions and suggests validation hints when
+  configured (Phase 3); otherwise rule-based dictionary/mapping heuristics are
+  used. The original wording is always preserved and available in the stepper.
 - **Caching:** extraction results are cached by the SHA-256 hash of the file or
   fetched HTML in the in-memory LRU (`src/lib/extraction/cache.ts`), so
   re-attaching the same form is instant. Hits/misses are logged server-side.
@@ -311,7 +333,7 @@ Live now:
 
 | Method | Path | Auth | Notes |
 | --- | --- | --- | --- |
-| GET | `/api/v1/health` | public | Service configuration/database status. Values: `configured`, `ready`, `connected`, `demo`, `unavailable`. |
+| GET | `/api/v1/health` | public | Service configuration/database status. Values: `active`, `ready`, `connected`, `demo`, `unavailable`. |
 | POST | `/api/v1/auth/signup` | public | Email + password; sets session cookie. Rate-limited per IP. |
 | POST | `/api/v1/auth/login` | public | Email + password; sets session cookie. Rate-limited per IP. |
 | POST | `/api/v1/auth/logout` | session/token | Deletes the session; CSRF required for cookie sessions. |
@@ -364,8 +386,15 @@ autofill, and token management arrive in Phase 5. See
   the resolved IP with a custom dispatcher if this becomes a hard requirement).
 - **Form data:** answers are validated server-side on save and again on export;
   API logs never include form text or answers.
+- **AI safety:** form text is untrusted; Gemma prompts use explicit delimiters and
+  never execute instructions found in form text. AI output is zod-validated,
+  bounded, and only used for display fields (question wording, help text,
+  type/required hints). Prompts and model responses are never logged.
+- **AI budget/rate limits:** daily AI usage is in-memory per user and per process;
+  use shared storage if you run multiple instances. AI runs only through the
+  attach endpoints that already have per-IP/per-user limits.
 - **Not yet built:** real OAuth, browser extension, PDF output, template
-  sharing. Mock auth is intentional for now.
+  sharing, voice. Mock auth is intentional for now.
 
 ---
 
@@ -385,8 +414,8 @@ autofill route). `npm test` will run the full suite once added.
 | --- | --- | --- |
 | 1 | Setup, docs, design, mock auth, MongoDB, API skeleton, CORS | **Done** |
 | 2 | Attach · validation · extraction · stepper · review · JSON export | **Done** |
-| 3 | Gemma integration with LRU cache + zod-validated output | Next |
-| 4 | Voice toggle · ElevenLabs with fallback · motion polish | Planned |
+| 3 | Gemma integration with cache, zod validation, budget, rule fallback | **Done** |
+| 4 | Voice toggle · ElevenLabs with fallback · motion polish | Next |
 | 5 | Templates placeholder · Context Explorer · API tokens · autofillKey | Planned |
 | 6 | Tests · security review · extension API docs · final README | Planned |
 

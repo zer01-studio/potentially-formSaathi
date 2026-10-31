@@ -35,6 +35,7 @@ const formSchema = new Schema(
     fields: { type: [formFieldSchema], default: [] },
     extractionMode: { type: String, enum: EXTRACTION_MODES, required: true },
     demoFallback: { type: Boolean, default: false },
+    aiEnhanced: { type: Boolean, default: false },
     extractionNote: { type: String, maxlength: 300 },
     createdAt: { type: Date, default: () => new Date() },
   },

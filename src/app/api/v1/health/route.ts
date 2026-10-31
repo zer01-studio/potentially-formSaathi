@@ -20,7 +20,7 @@ export const GET = withApi({ auth: "none" }, async () => {
     status: database ? "ok" : "degraded",
     time: new Date().toISOString(),
     services: {
-      gemma: services.gemma ? "configured" : "demo",
+      gemma: services.gemma ? "active" : "demo",
       elevenlabs: services.elevenlabs ? "configured" : "demo",
       ocr: services.ocr ? "ready" : "demo",
       database: database ? "connected" : "unavailable",

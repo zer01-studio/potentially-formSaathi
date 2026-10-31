@@ -467,6 +467,11 @@ export function FormRunner({ formId }: { formId: string }) {
             Sample form
           </span>
         ) : null}
+        {form.aiEnhanced ? (
+          <span className="rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 font-mono text-[8.5px] uppercase tracking-[0.12em] text-primary">
+            AI simplified
+          </span>
+        ) : null}
         <span className="rounded-full border border-border bg-card px-2.5 py-1 font-mono text-[8.5px] uppercase tracking-[0.12em] text-muted-foreground">
           {form.answeredCount} of {form.fieldCount} answered
         </span>

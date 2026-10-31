@@ -63,24 +63,9 @@ export async function extractImage(
     );
   }
 
+  let text: string;
   try {
-    const { text } = await recognizeImage(buffer);
-    const outcome = outcomeFromText(text, "Image form", "ocr");
-
-    if (outcome) {
-      extractionCache.set(contentHash, {
-        title: outcome.title,
-        fields: outcome.fields,
-        mode: "ocr",
-      });
-      return outcome;
-    }
-
-    logWarn("extraction.no_questions", { source: "image", mode: "ocr" });
-    return demoOutcome(
-      contentHash,
-      "We read the image, but couldn’t find clear form questions. Try a clearer, tightly-cropped screenshot, or upload the original PDF.",
-    );
+    ({ text } = await recognizeImage(buffer));
   } catch (error) {
     logWarn("extraction.ocr_failed", {
       source: "image",
@@ -91,6 +76,24 @@ export async function extractImage(
       "OCR couldn’t read that image, so here’s a bundled sample form. Check that OCR is available, or try a PDF or a clearer photo.",
     );
   }
+
+  const outcome = outcomeFromText(text, "Image form", "ocr");
+
+  if (!outcome) {
+    logWarn("extraction.no_questions", { source: "image", mode: "ocr" });
+    throw new ApiHttpError(
+      422,
+      "no_form_questions",
+      "We read the image, but couldn’t find clear form questions. Try a clearer, tightly-cropped screenshot, or upload the original PDF.",
+    );
+  }
+
+  extractionCache.set(contentHash, {
+    title: outcome.title,
+    fields: outcome.fields,
+    mode: "ocr",
+  });
+  return outcome;
 }
 
 export async function extractPdf(options: {
@@ -124,6 +127,13 @@ export async function extractPdf(options: {
       });
       return outcome;
     }
+
+    logWarn("extraction.no_questions", { source: "pdf", mode: "text" });
+    throw new ApiHttpError(
+      422,
+      "no_form_questions",
+      "We read this PDF, but couldn’t find clear form questions. Try a PDF that shows the questions clearly.",
+    );
   }
 
   if (!services.ocr) {
@@ -133,24 +143,9 @@ export async function extractPdf(options: {
     );
   }
 
+  let ocrText: string;
   try {
-    const { text } = await ocrPdfPages(filePath, pdf.pageCount);
-    const outcome = outcomeFromText(text, "Scanned PDF form", "ocr");
-
-    if (outcome) {
-      extractionCache.set(contentHash, {
-        title: outcome.title,
-        fields: outcome.fields,
-        mode: "ocr",
-      });
-      return outcome;
-    }
-
-    logWarn("extraction.no_questions", { source: "pdf", mode: "ocr" });
-    return demoOutcome(
-      contentHash,
-      "We read the scanned PDF, but couldn’t find clear form questions. Try a clearer scan or a PDF with a text layer.",
-    );
+    ({ text: ocrText } = await ocrPdfPages(filePath, pdf.pageCount));
   } catch (error) {
     logWarn("extraction.ocr_failed", {
       source: "pdf",
@@ -161,4 +156,22 @@ export async function extractPdf(options: {
       "OCR couldn’t read this scanned PDF, so here’s a bundled sample form. Try a clearer scan or a PDF with selectable text.",
     );
   }
+
+  const outcome = outcomeFromText(ocrText, "Scanned PDF form", "ocr");
+
+  if (!outcome) {
+    logWarn("extraction.no_questions", { source: "pdf", mode: "ocr" });
+    throw new ApiHttpError(
+      422,
+      "no_form_questions",
+      "We read the scanned PDF, but couldn’t find clear form questions. Try a clearer scan, or upload the original PDF if it has selectable text.",
+    );
+  }
+
+  extractionCache.set(contentHash, {
+    title: outcome.title,
+    fields: outcome.fields,
+    mode: "ocr",
+  });
+  return outcome;
 }

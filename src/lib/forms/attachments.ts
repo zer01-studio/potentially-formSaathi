@@ -2,6 +2,7 @@ import "server-only";
 import { connectDb } from "@/lib/db/connect";
 import { Form } from "@/lib/db/models/form";
 import { ApiHttpError } from "@/lib/api/errors";
+import { simplifyFieldsWithGemma } from "@/lib/ai/simplify";
 import { env } from "@/lib/env";
 import { extractionCache } from "@/lib/extraction/cache";
 import { extractImage, extractPdf, hashBuffer } from "@/lib/extraction/files";
@@ -28,15 +29,29 @@ async function insertForm(options: {
   const { userId, sourceType, sourceLabel, contentHash, outcome } = options;
   await connectDb();
 
+  let fields = outcome.fields;
+  let aiEnhanced = false;
+
+  if (outcome.mode !== "demo" && outcome.fields.length > 0) {
+    const simplified = await simplifyFieldsWithGemma({
+      userId,
+      title: outcome.title,
+      fields: outcome.fields,
+    });
+    fields = simplified.fields;
+    aiEnhanced = simplified.usedAi;
+  }
+
   const created = await Form.create({
     userId,
     sourceType,
     sourceLabel: sourceLabel.slice(0, 120) || "Form",
     contentHash,
     title: outcome.title.slice(0, 160) || "Untitled form",
-    fields: outcome.fields,
+    fields,
     extractionMode: outcome.mode,
     demoFallback: outcome.demoFallback,
+    aiEnhanced,
     ...(outcome.note ? { extractionNote: outcome.note.slice(0, 300) } : {}),
   });
 
@@ -45,6 +60,7 @@ async function insertForm(options: {
     mode: outcome.mode,
     fields: outcome.fields.length,
     demo: outcome.demoFallback,
+    ai: aiEnhanced,
   });
 
   return toFormSummary(created.toObject() as unknown as FormRecordLike, 0);

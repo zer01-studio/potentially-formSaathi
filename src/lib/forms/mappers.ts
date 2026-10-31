@@ -27,6 +27,7 @@ export type FormRecordLike = {
   createdAt?: Date | null;
   extractionMode: string;
   demoFallback?: boolean | null;
+  aiEnhanced?: boolean | null;
   extractionNote?: string | null;
 };
 
@@ -64,6 +65,7 @@ export function toFormSummary(
     createdAt: (form.createdAt ?? new Date()).toISOString(),
     extractionMode: form.extractionMode as ExtractionMode,
     demoFallback: Boolean(form.demoFallback),
+    aiEnhanced: Boolean(form.aiEnhanced),
   };
 }
 
